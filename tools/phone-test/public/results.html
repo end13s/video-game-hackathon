@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phone test results</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { margin: 0; padding: 20px; background: #111318; color: #eef0f4; font: 15px/1.4 system-ui, -apple-system, sans-serif; }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    .bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    button { border: 0; border-radius: 8px; padding: 10px 16px; background: #3b82f6; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button.done { background: #16a34a; }
+    a { color: #93c5fd; }
+    .muted { color: #9aa3b2; }
+    #devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; }
+    .device { background: #1b1e27; border-radius: 12px; padding: 14px; }
+    .device h2 { margin: 0; font-size: 17px; display: flex; justify-content: space-between; }
+    .device .ua { font: 12px ui-monospace, Menlo, monospace; color: #9aa3b2; margin: 4px 0 10px; word-break: break-all; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 5px 4px; border-top: 1px solid #2a2f3c; vertical-align: top; }
+    td:first-child { width: 90px; font-weight: 600; white-space: nowrap; }
+    td.ok::before { content: "✔ "; color: #4ade80; }
+    td.fail::before { content: "✘ "; color: #f87171; }
+    td.warn::before { content: "● "; color: #fbbf24; }
+    .on { color: #4ade80; }
+    .off { color: #f87171; }
+    #voice-log { margin-top: 20px; background: #1b1e27; border-radius: 12px; padding: 14px; }
+    #voice-log div { padding: 4px 0; border-top: 1px solid #2a2f3c; }
+  </style>
+</head>
+<body>
+  <h1>Phone test results</h1>
+  <div class="bar">
+    <button id="audio-btn">Enable audio (for the voice test)</button>
+    <a href="/results.json" target="_blank">Download JSON</a>
+    <span class="muted" id="count"></span>
+  </div>
+  <div id="devices"></div>
+  <div id="voice-log"><strong>Voice log</strong></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const TESTS = ['https', 'motion', 'wakelock', 'touch', 'vibrate', 'latency', 'voice'];
+    const audio = new Audio();
+    let audioUnlocked = false;
+
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    // Browsers block audio until the page has been clicked once.
+    document.getElementById('audio-btn').onclick = async () => {
+      // Short silent wav, just to unlock playback.
+      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+      try { await audio.play(); } catch {}
+      audioUnlocked = true;
+      const btn = document.getElementById('audio-btn');
+      btn.textContent = 'Audio enabled';
+      btn.classList.add('done');
+    };
+
+    socket.on('connect', () => socket.emit('results:join'));
+
+    socket.on('results:state', ({ devices }) => {
+      const list = Object.entries(devices).sort((a, b) => b[1].lastSeen - a[1].lastSeen);
+      document.getElementById('count').textContent = `${list.length} device(s)`;
+      document.getElementById('devices').innerHTML = list.map(([id, d]) => `
+        <div class="device">
+          <h2>${esc(d.label || id)} <span class="${d.connected ? 'on' : 'off'}">${d.connected ? '● online' : '● offline'}</span></h2>
+          <div class="ua">${esc(d.ua)}</div>
+          <table>
+            ${TESTS.map((t) => {
+              const r = d.results[t];
+              if (!r) return `<tr><td>${t}</td><td class="muted">not run</td></tr>`;
+              const cls = r.ok === true ? 'ok' : r.ok === false ? 'fail' : 'warn';
+              return `<tr><td class="${cls}">${t}</td><td>${esc(r.value)} <span class="muted">${new Date(r.at).toLocaleTimeString()}</span></td></tr>`;
+            }).join('')}
+          </table>
+        </div>`).join('');
+    });
+
+    function log(html) {
+      const div = document.createElement('div');
+      div.innerHTML = `<span class="muted">${new Date().toLocaleTimeString()}</span> ${html}`;
+      document.getElementById('voice-log').appendChild(div);
+    }
+
+    socket.on('voice:play', async ({ id, url, text, modelId, from }) => {
+      log(`${esc(from)} → <em>${esc(text)}</em> <span class="muted">(${esc(modelId)})</span>`);
+      if (!audioUnlocked) {
+        log('<span class="off">Audio not enabled on this page. Click "Enable audio" and try again.</span>');
+        return socket.emit('voice:failed', { id, error: 'audio not enabled on /results (click "Enable audio")' });
+      }
+      audio.onplaying = () => socket.emit('voice:playing', { id });
+      audio.src = url;
+      try {
+        await audio.play();
+      } catch (err) {
+        socket.emit('voice:failed', { id, error: err.message });
+      }
+    });
+
+    socket.on('voice:timing', ({ firstByteMs, playingMs }) => {
+      log(`<span class="on">playing</span>: first byte ${firstByteMs} ms, playback started ${playingMs} ms after the server got the text`);
+    });
+    socket.on('voice:error', ({ error }) => log(`<span class="off">${esc(error)}</span>`));
+  </script>
+</body>
+</html>

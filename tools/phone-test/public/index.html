@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#111318">
+  <title>Phone test</title>
+  <link rel="icon" href="data:,">
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: manipulation;
+      -webkit-user-select: none; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      padding: env(safe-area-inset-top) 10px env(safe-area-inset-bottom);
+      background: #111318; color: #eef0f4;
+      font: 16px/1.35 system-ui, -apple-system, sans-serif;
+    }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 8px 2px; font-size: 14px; color: #9aa3b2; }
+    #conn.on { color: #4ade80; }
+    #conn.off { color: #f87171; }
+    #tests { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    #tests button {
+      min-width: 0; min-height: 56px; border: 0; border-radius: 12px; padding: 6px 10px;
+      background: #232733; color: inherit; font: inherit; font-weight: 600; text-align: left;
+      border-left: 6px solid #4b5263;
+    }
+    #tests button.ok { border-left-color: #4ade80; }
+    #tests button.fail { border-left-color: #f87171; }
+    #tests button.warn { border-left-color: #fbbf24; }
+    #tests button.active { background: #323849; }
+    #tests small { display: block; font-weight: 400; color: #9aa3b2; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #panel { flex: 1; min-height: 0; margin: 10px 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+    #panel section { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+    #panel h2 { margin: 0; font-size: 18px; }
+    .big { min-height: 56px; border: 0; border-radius: 12px; background: #3b82f6; color: #fff; font: inherit; font-weight: 700; font-size: 18px; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    .mono { font-family: ui-monospace, Menlo, monospace; font-size: 14px; word-break: break-all; }
+    .num { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .muted { color: #9aa3b2; font-size: 14px; }
+    #touch-area {
+      flex: 1; min-height: 120px; position: relative; border-radius: 12px;
+      background: repeating-linear-gradient(45deg, #1b1e27 0 12px, #20242f 12px 24px);
+      touch-action: none; overflow: hidden;
+    }
+    .dot {
+      position: absolute; width: 70px; height: 70px; margin: -35px 0 0 -35px; border-radius: 50%;
+      background: rgba(59,130,246,.55); border: 2px solid #93c5fd; pointer-events: none;
+      display: grid; place-items: center; font-weight: 700;
+    }
+    textarea { width: 100%; height: 76px; border-radius: 10px; border: 0; padding: 8px; font: inherit; font-size: 16px; resize: none; user-select: text; -webkit-user-select: text; }
+    select { font: inherit; font-size: 16px; padding: 8px; border-radius: 10px; }
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tags button { border: 0; border-radius: 8px; padding: 8px 10px; background: #2c3140; color: inherit; font: inherit; font-size: 14px; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <span id="device-label">…</span>
+    <span id="conn" class="off">● offline</span>
+  </header>
+
+  <div id="tests">
+    <button data-test="https">1. HTTPS<small id="s-https">–</small></button>
+    <button data-test="motion">2. Motion<small id="s-motion">tap to test</small></button>
+    <button data-test="wakelock">3. Wake lock<small id="s-wakelock">tap to test</small></button>
+    <button data-test="touch">4. Touch<small id="s-touch">tap to test</small></button>
+    <button data-test="vibrate">5. Vibration<small id="s-vibrate">tap to test</small></button>
+    <button data-test="latency">6. Latency<small id="s-latency">tap to test</small></button>
+    <button data-test="voice" style="grid-column: span 2">7. Voice (ElevenLabs)<small id="s-voice">tap to test</small></button>
+  </div>
+
+  <main id="panel">
+    <section data-panel="https">
+      <h2>HTTPS</h2>
+      <div class="num" id="https-secure">–</div>
+      <div class="muted">Protocol: <span id="https-proto"></span></div>
+      <div class="mono" id="https-ua"></div>
+    </section>
+
+    <section data-panel="motion" class="hidden">
+      <h2>Motion</h2>
+      <button class="big" id="motion-btn">Enable motion</button>
+      <div class="muted" id="motion-status">Not started</div>
+      <div class="row">
+        <div><div class="muted">beta (front/back)</div><div class="num" id="tilt-beta">–</div></div>
+        <div><div class="muted">gamma (left/right)</div><div class="num" id="tilt-gamma">–</div></div>
+      </div>
+      <div class="row">
+        <div><div class="muted">shake now</div><div class="num" id="shake-now">–</div></div>
+        <div><div class="muted">shake peak</div><div class="num" id="shake-peak">–</div></div>
+      </div>
+    </section>
+
+    <section data-panel="wakelock" class="hidden">
+      <h2>Wake lock</h2>
+      <button class="big" id="wakelock-btn">Request wake lock</button>
+      <div class="num" id="wakelock-status">–</div>
+      <div class="muted">Switch apps and come back: it should be re-acquired automatically. Then leave the phone alone and check the screen stays on.</div>
+    </section>
+
+    <section data-panel="touch" class="hidden">
+      <h2>Touch <span class="muted" id="touch-info"></span></h2>
+      <div id="touch-area"></div>
+    </section>
+
+    <section data-panel="vibrate" class="hidden">
+      <h2>Vibration</h2>
+      <div class="num" id="vibrate-supported">–</div>
+      <button class="big" id="vibrate-btn">Vibrate (200 ms)</button>
+      <div class="muted">iOS Safari has no vibration API, so "no" is expected on iPhone.</div>
+    </section>
+
+    <section data-panel="latency" class="hidden">
+      <h2>Latency</h2>
+      <button class="big" id="latency-btn">Run 20 pings</button>
+      <div class="num" id="latency-avg">–</div>
+      <div class="muted" id="latency-detail"></div>
+    </section>
+
+    <section data-panel="voice" class="hidden">
+      <h2>Voice</h2>
+      <div id="voice-off" class="muted hidden">Voice test is off on the server. Set ELEVENLABS_API_KEY and ELEVENLABS_TEST_VOICE_ID in .env and restart.</div>
+      <div id="voice-on" style="display:flex;flex-direction:column;gap:8px">
+        <div class="muted">Open /results on the laptop and tap "Enable audio" there first.</div>
+        <textarea id="voice-text" maxlength="300">Good evening. Thank you all for coming.</textarea>
+        <div class="tags">
+          <button data-sample="[sighs] Fine. I'll take one more question.">[sighs]</button>
+          <button data-sample="[nervous laugh] That's... a great question. [laughs] Next!">[nervous laugh]</button>
+          <button data-sample="[whispers] Off the record? [excited] It was me!">[whispers] [excited]</button>
+          <button data-sample="[sarcastic] Oh, absolutely. Best day of my life.">[sarcastic]</button>
+        </div>
+        <div class="row">
+          <select id="voice-model"></select>
+          <button class="big" id="voice-btn">Speak</button>
+        </div>
+        <div class="num" id="voice-result">–</div>
+        <div class="muted" id="voice-detail"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/phone.js"></script>
+</body>
+</html>
