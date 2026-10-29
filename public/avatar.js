@@ -1,6 +1,8 @@
 // Politician and reporter figures, shared by the phone and the TV. A look is a set
-// of option indexes ({ skin: 2, hair: 0, ... }). avatarSvg() draws head and
-// shoulders; personSvg() draws a full standing figure that can walk and hold props.
+// of option indexes ({ skin: 2, hair: 0, ... }) for background reporters, or the values
+// themselves for the politicians in content.js ({ hair: 'Swoop', skin: '#f2a65e', ... }).
+// avatarSvg() draws head and shoulders; personSvg() draws a full standing figure that
+// can walk and hold props.
 const LOOK_OPTIONS = {
   skin: ['#f8d5b5', '#eab68c', '#c98d5e', '#a86b3c', '#7a4a28', '#4f2f1a'],
   hair: ['Bald', 'Short', 'Side part', 'Long', 'Bun', 'Pompadour', 'Mohawk'],
@@ -32,8 +34,10 @@ function shade(hex, amount) {
 
 function lookParts(look = {}) {
   const opt = (key) => {
+    const v = look[key];
+    if (typeof v === 'string' || Array.isArray(v)) return v;
     const list = LOOK_OPTIONS[key];
-    const i = Number(look[key]) || 0;
+    const i = Number(v) || 0;
     return list[((i % list.length) + list.length) % list.length];
   };
   const suit = opt('suit');
@@ -43,13 +47,22 @@ function lookParts(look = {}) {
     suit,
     shirt: suit === '#e8e4d8' ? '#c9d6ea' : '#ffffff',
     hair: opt('hair'),
-    extra: opt('extra'),
+    extras: [].concat(opt('extra')),
     mouth: opt('mouth'),
+    bigEars: look.ears === 'Big',
+    tie: look.tie || null, // 'none' for no tie
   };
 }
 
+const hasHat = (p) => p.extras.includes('Lincoln');
+
+// Stovepipe hat, sitting on the head (top of the head is y 21).
+const TOP_HAT = `<rect x="34" y="-16" width="32" height="38" rx="2" fill="#17171b"/><rect x="34" y="-16" width="9" height="38" fill="#fff" opacity=".07"/>
+  <rect x="34" y="13" width="32" height="5" fill="#3a2a1a"/><ellipse cx="50" cy="21.5" rx="26" ry="4.5" fill="#17171b"/>`;
+
 // Shared gradients for one figure: lit face, hair sheen, suit folds, tie.
 function figureDefs(p, id, tie) {
+  if (p.tie && p.tie !== 'none') tie = p.tie;
   return `<defs>
     <radialGradient id="face${id}" cx="42%" cy="36%" r="70%">
       <stop offset="0" stop-color="${shade(p.skin, 0.18)}"/><stop offset=".55" stop-color="${p.skin}"/><stop offset="1" stop-color="${shade(p.skin, -0.28)}"/>
@@ -72,6 +85,8 @@ function headSvg(p, id) {
   const back = {
     Long: `<path d="M25 72 Q18 14 50 14 Q82 14 75 72 Q66 78 64 70 L36 70 Q34 78 25 72Z" fill="${hairFill}"/>`,
     Bun: `<circle cx="50" cy="13" r="9.5" fill="${hairFill}"/><circle cx="47" cy="10" r="3" fill="#fff" opacity=".18"/>`,
+    Bob: `<path d="M24 66 Q16 15 50 14 Q84 15 76 66 Q70 70 66 63 L34 63 Q30 70 24 66Z" fill="${hairFill}"/>`,
+    Swoop: `<path d="M25 56 Q19 30 30 20 L70 20 Q81 30 75 56Z" fill="${hairFill}"/>`,
   }[p.hair] || '';
   const front = {
     Bald: `<ellipse cx="43" cy="30" rx="9" ry="5" fill="#fff" opacity=".22"/>`,
@@ -81,7 +96,13 @@ function headSvg(p, id) {
     Bun: `<path d="M28 42 Q28 18 50 18 Q72 18 72 42 Q64 28 50 28 Q36 28 28 42Z" fill="${hairFill}"/>`,
     Pompadour: `<path d="M27 42 Q21 4 55 7 Q84 12 73 42 Q70 25 50 25 Q34 25 27 42Z" fill="${hairFill}"/><path d="M36 15 Q52 6 70 14" stroke="#fff" stroke-width="2" opacity=".22" fill="none"/>`,
     Mohawk: `<path d="M44 30 L45 5 L50 0 L55 5 L56 30Z" fill="${hairFill}"/>`,
-  }[p.hair];
+    // The famous politicians' hair.
+    Swoop: `<path d="M25 46 Q18 18 42 12 Q68 7 79 23 Q82 32 75 44 Q73 33 63 30 Q48 36 34 31 Q28 36 25 46Z" fill="${hairFill}"/><path d="M29 30 Q45 15 76 22" stroke="#fff" stroke-width="2.5" opacity=".3" fill="none"/><path d="M33 33 Q50 24 70 27" stroke="${shade(p.hairC, -0.3)}" stroke-width="1.2" opacity=".6" fill="none"/>`,
+    Buzz: `<path d="M28 42 Q27 19 50 19 Q73 19 72 42 Q70 30 62 27.5 Q50 26 38 27.5 Q30 30 28 42Z" fill="${hairFill}"/><path d="M30 34 Q31 24 38 22" stroke="#fff" stroke-width="1.2" opacity=".25" fill="none"/>`,
+    Combed: `<path d="M28 43 Q27 22 41 19 Q58 16 70 23 Q74 31 72 43 Q69 31 59 27 Q47 26 37 30 Q31 34 28 43Z" fill="${hairFill}"/><path d="M38 24 Q52 18 66 24M36 28 Q50 22 68 28" stroke="${shade(p.hairC, -0.25)}" stroke-width=".9" fill="none"/>`,
+    Bob: `<path d="M27 46 Q25 16 52 16 Q77 18 73 46 Q67 27 47 28 Q36 32 27 46Z" fill="${hairFill}"/><path d="M36 24 Q50 18 66 23" stroke="#fff" stroke-width="1.6" opacity=".25" fill="none"/>`,
+    Tufts: `<ellipse cx="43" cy="28" rx="9" ry="4.5" fill="#fff" opacity=".22"/><g fill="${hairFill}"><path d="M30 47 Q21 46 22.5 39 Q18 33 24.5 30 Q24 23 32 25 Q29.5 31 32.5 36 Q28 41 30 47Z"/><path d="M70 47 Q79 46 77.5 39 Q82 33 75.5 30 Q76 23 68 25 Q70.5 31 67.5 36 Q72 41 70 47Z"/></g><path d="M23 33 q-4 -2 -4.5 -7M26 27 q-1 -5 2.5 -7.5M77 33 q4 -2 4.5 -7M74 27 q1 -5 -2.5 -7.5" stroke="${hairFill}" stroke-width="1.3" fill="none" stroke-linecap="round"/><path d="M42 23 Q45 15 50 21 Q54 14 58 22" stroke="${hairFill}" stroke-width="1.6" fill="none" stroke-linecap="round"/>`,
+  }[p.hair] || '';
 
   const ink = '#2a1810';
   const mouth = {
@@ -89,25 +110,45 @@ function headSvg(p, id) {
     Smirk: `<path d="M43 62.5 Q52 64.5 58.5 58.5" stroke="${ink}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`,
     Grimace: `<rect x="41" y="58.5" width="18" height="6.5" rx="2.5" fill="#fff" stroke="${ink}" stroke-width="1.6"/><path d="M45.5 58.5v6.5M50 58.5v6.5M54.5 58.5v6.5" stroke="${ink}" stroke-width=".8"/>`,
     Shouting: `<ellipse cx="50" cy="62" rx="6.5" ry="5.5" fill="${ink}"/><ellipse cx="50" cy="65" rx="4" ry="2" fill="#c0504d"/><path d="M45 58.5 Q50 57.5 55 58.5" stroke="#fff" stroke-width="1.4" fill="none"/>`,
-  }[p.mouth];
+    Pout: `<ellipse cx="50" cy="62" rx="4.6" ry="3.4" fill="${shade(p.skin, -0.35)}"/><ellipse cx="50" cy="62" rx="2.2" ry="1.4" fill="${ink}"/>`,
+    Grin: `<path d="M40 59 Q50 71 60 59Z" fill="#fff" stroke="${ink}" stroke-width="1.8" stroke-linejoin="round"/><path d="M41.5 60 Q50 62 58.5 60" stroke="${ink}" stroke-width=".8" fill="none"/>`,
+    Lipstick: `<path d="M42 61 Q50 68 58 61 Q50 63.5 42 61Z" fill="#c8102e"/><path d="M42 61 Q46 58 50 59.6 Q54 58 58 61 Q50 62.4 42 61Z" fill="#a50d26"/>`,
+  }[p.mouth] || '';
 
-  const extra = {
+  const extraSvg = {
     None: '',
     Glasses: `<g fill="#9ecbff" fill-opacity=".18" stroke="#1f1a17" stroke-width="1.8"><rect x="34" y="42" width="13" height="10" rx="4"/><rect x="53" y="42" width="13" height="10" rx="4"/></g><path d="M47 46h6" stroke="#1f1a17" stroke-width="1.8"/><path d="M36 44 l4 -1" stroke="#fff" stroke-width="1" opacity=".7"/>`,
     Mustache: `<path d="M38 56.5 Q44 51 50 55 Q56 51 62 56.5 Q56 59.5 50 57.5 Q44 59.5 38 56.5Z" fill="${hairFill}"/>`,
     Sunglasses: `<g fill="#0d0d12"><rect x="32.5" y="42" width="15" height="9.5" rx="3.5"/><rect x="52.5" y="42" width="15" height="9.5" rx="3.5"/><rect x="46" y="44" width="8" height="2"/></g><path d="M35 44.5 l5 -1.2M55 44.5 l5 -1.2" stroke="#fff" stroke-width="1.2" opacity=".55"/>`,
     Beard: `<path d="M29 50 Q30 78 50 80 Q70 78 71 50 Q67 66 50 67 Q33 66 29 50Z" fill="${hairFill}"/>`,
     Monocle: `<circle cx="59" cy="47" r="6.5" fill="#cfe6ff" fill-opacity=".2" stroke="#c9a227" stroke-width="1.8"/><path d="M65 50 Q68 62 64 74" stroke="#c9a227" stroke-width="1" fill="none"/>`,
-  }[p.extra];
+    Aviators: `<g fill="#2b2f3a" fill-opacity=".9" stroke="#c9a227" stroke-width="1.4"><path d="M31.5 42.5 h16 q1 10 -7.5 10.5 q-8.5 0 -8.5 -10.5z"/><path d="M52.5 42.5 h16 q0 10.5 -8.5 10.5 q-8.5 -.5 -7.5 -10.5z"/></g><path d="M47.5 44h5" stroke="#c9a227" stroke-width="1.4"/><path d="M34 45 l5 -1.2M55 45 l5 -1.2" stroke="#fff" stroke-width="1.2" opacity=".5"/>`,
+    Lincoln: `<path d="M29 50 Q29 82 50 84 Q71 82 71 50 Q69 62 63 67 Q57 71 50 71 Q43 71 37 67 Q31 62 29 50Z" fill="${hairFill}"/>${TOP_HAT}`,
+    Pearls: Array.from({ length: 9 }, (_, i) => {
+      const t = (i + 1) / 10;
+      const x = 39 + 22 * t;
+      const y = 74 + 18 * t * (1 - t);
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="1.9" fill="#f7f3ea" stroke="#cfc6b4" stroke-width=".5"/>`;
+    }).join(''),
+    Hoops: `<g fill="none" stroke="#e2b13c" stroke-width="1.4"><circle cx="27" cy="58" r="4"/><circle cx="73" cy="58" r="4"/></g>`,
+    'Tan lines': '', // drawn under the eyes, below
+  };
+  const extra = p.extras.map((e) => extraSvg[e] || '').join('');
+  // Paler skin where the sunglasses were.
+  const tanLines = p.extras.includes('Tan lines')
+    ? `<ellipse cx="41" cy="47.5" rx="6.8" ry="4.6" fill="${shade(p.skin, 0.55)}" opacity=".85"/><ellipse cx="59" cy="47.5" rx="6.8" ry="4.6" fill="${shade(p.skin, 0.55)}" opacity=".85"/>`
+    : '';
+  const [earX, earRx, earRy] = p.bigEars ? [25.5, 6.5, 9] : [28, 4.2, 6.5];
 
   return `
     ${back}
     <path d="M42 64 L42 84 L58 84 L58 64Z" fill="${shade(p.skin, -0.12)}"/>
     <path d="M42 70 Q50 78 58 70 L58 76 Q50 82 42 76Z" fill="${shade(p.skin, -0.32)}" opacity=".6"/>
-    <ellipse cx="28" cy="48" rx="4.2" ry="6.5" fill="${shade(p.skin, -0.12)}"/><ellipse cx="72" cy="48" rx="4.2" ry="6.5" fill="${shade(p.skin, -0.2)}"/>
-    <path d="M27.5 46 q2 2 0 5M72.5 46 q-2 2 0 5" stroke="${shade(p.skin, -0.4)}" stroke-width="1" fill="none"/>
+    <ellipse cx="${earX}" cy="48" rx="${earRx}" ry="${earRy}" fill="${shade(p.skin, -0.12)}"/><ellipse cx="${100 - earX}" cy="48" rx="${earRx}" ry="${earRy}" fill="${shade(p.skin, -0.2)}"/>
+    <path d="M${earX - 0.5} 46 q2 2 0 5M${100.5 - earX} 46 q-2 2 0 5" stroke="${shade(p.skin, -0.4)}" stroke-width="1" fill="none"/>
     <ellipse cx="50" cy="46" rx="22" ry="25" fill="url(#face${id})"/>
     ${front}
+    ${tanLines}
     <ellipse cx="41" cy="47.5" rx="3.8" ry="2.7" fill="#fff"/><ellipse cx="59" cy="47.5" rx="3.8" ry="2.7" fill="#fff"/>
     <circle cx="41.6" cy="47.6" r="2" fill="#3b2a1f"/><circle cx="59.6" cy="47.6" r="2" fill="#3b2a1f"/>
     <circle cx="42.3" cy="46.9" r=".7" fill="#fff"/><circle cx="60.3" cy="46.9" r=".7" fill="#fff"/>
@@ -125,7 +166,7 @@ function torsoSvg(p, id, bottom) {
     <path d="M10 ${bottom} Q11 84 50 81 Q89 84 90 ${bottom}Z" fill="url(#suit${id})"/>
     <path d="M40 81 L50 98 L60 81Z" fill="${p.shirt}"/>
     <path d="M40 81 L50 98 L60 81" stroke="${shade(p.shirt, -0.15)}" stroke-width="1" fill="none"/>
-    <path d="M46.5 83 L53.5 83 L55.5 102 L50 109 L44.5 102Z" fill="url(#tie${id})"/>
+    ${p.tie === 'none' ? '' : `<path d="M46.5 83 L53.5 83 L55.5 102 L50 109 L44.5 102Z" fill="url(#tie${id})"/>`}
     <path d="M40 81 L36 92 L47 103 L39 ${bottom}" stroke="${shade(p.suit, -0.45)}" stroke-width="1.6" fill="none" opacity=".7"/>
     <path d="M60 81 L64 92 L53 103 L61 ${bottom}" stroke="${shade(p.suit, -0.45)}" stroke-width="1.6" fill="none" opacity=".7"/>
     <path d="M20 95 Q24 104 22 ${bottom}" stroke="${shade(p.suit, -0.5)}" stroke-width="1.2" fill="none" opacity=".5"/>
@@ -135,7 +176,9 @@ function torsoSvg(p, id, bottom) {
 function avatarSvg(look = {}, tie = '#d7263d') {
   const id = ++figureCount;
   const p = lookParts(look);
-  return `<svg viewBox="0 0 100 110" xmlns="http://www.w3.org/2000/svg" class="avatar-svg">
+  // Taller box for a hat, so it isn't cut off.
+  const box = hasHat(p) ? '0 -18 100 128' : '0 0 100 110';
+  return `<svg viewBox="${box}" xmlns="http://www.w3.org/2000/svg" class="avatar-svg">
     ${figureDefs(p, id, tie)}
     ${torsoSvg(p, id, 110)}
     ${headSvg(p, id)}
@@ -219,7 +262,12 @@ function backSvg(look = {}, tie = '#d7263d', opts = {}) {
     Bun: skull + cap() + `<circle cx="50" cy="22" r="10" fill="${hairFill}"/><circle cx="47" cy="19" r="3" fill="#fff" opacity=".18"/>`,
     Pompadour: skull + cap(8),
     Mohawk: skull + `<path d="M45 6 L55 6 L54 62 L46 62Z" fill="${hairFill}"/>`,
-  }[p.hair];
+    Swoop: skull + cap(9) + `<path d="M30 30 Q50 16 72 26" stroke="#fff" stroke-width="2" opacity=".25" fill="none"/>`,
+    Buzz: skull + cap(17),
+    Combed: skull + cap(16) + `<path d="M38 20 Q46 36 44 54M50 18 Q54 36 52 56M60 20 Q62 36 60 54" stroke="${shade(p.hairC, -0.25)}" stroke-width=".9" fill="none"/>`,
+    Bob: `<path d="M26 42 Q25 13 50 13 Q75 13 74 42 L76 64 Q50 70 24 64Z" fill="${hairFill}"/>`,
+    Tufts: `<ellipse cx="50" cy="40" rx="21" ry="24" fill="url(#face${id})"/><ellipse cx="44" cy="27" rx="8" ry="4" fill="#fff" opacity=".22"/><path d="M28 40 Q28 62 50 63 Q72 62 72 40 Q70 52 50 54 Q30 52 28 40Z" fill="${hairFill}"/>`,
+  }[p.hair] || skull + cap();
 
   let arms = `
     <path d="M17 88 Q12 112 14 ${bottom}" stroke="${sleeve}" stroke-width="13" stroke-linecap="round" fill="none"/>
@@ -251,12 +299,13 @@ function backSvg(look = {}, tie = '#d7263d', opts = {}) {
     ${figureDefs(p, id, tie)}
     ${legs}
     <g class="body">
-      <ellipse cx="28.5" cy="44" rx="4" ry="6.5" fill="${nape}"/><ellipse cx="71.5" cy="44" rx="4" ry="6.5" fill="${shade(p.skin, -0.25)}"/>
+      <ellipse cx="${p.bigEars ? 27 : 28.5}" cy="44" rx="${p.bigEars ? 6 : 4}" ry="${p.bigEars ? 8.5 : 6.5}" fill="${nape}"/><ellipse cx="${p.bigEars ? 73 : 71.5}" cy="44" rx="${p.bigEars ? 6 : 4}" ry="${p.bigEars ? 8.5 : 6.5}" fill="${shade(p.skin, -0.25)}"/>
       <rect x="41" y="56" width="18" height="18" fill="${shade(p.skin, -0.2)}"/>
       ${p.hair === 'Long' ? '' : hair}
       <path d="M10 ${bottom} Q10 76 50 72 Q90 76 90 ${bottom}Z" fill="url(#suit${id})"/>
       <path d="M41 71 Q50 76 59 71 L59 74 Q50 79 41 74Z" fill="${p.shirt}"/>
       ${p.hair === 'Long' ? hair : ''}
+      ${hasHat(p) ? `<g transform="translate(0 -6)">${TOP_HAT}</g>` : ''}
       <path d="M50 79 L50 ${bottom}" stroke="${shade(p.suit, -0.45)}" stroke-width="1.4" opacity=".7"/>
       <path d="M26 92 Q32 104 30 120M74 92 Q68 104 70 120" stroke="${shade(p.suit, -0.4)}" stroke-width="1.2" fill="none" opacity=".45"/>
       ${arms}

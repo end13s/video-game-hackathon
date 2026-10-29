@@ -48,8 +48,6 @@ const REACT_GAP_MS = 400; // per player, so nobody floods the room
 const REACTIONS = ['laugh', 'applause', 'gasp', 'boo', 'tomato', 'liar'];
 const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316'];
 const BOT_NAMES = content.botNames || ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'];
-// Number of choices per avatar part; must match LOOK_OPTIONS in public/avatar.js.
-const LOOK_SIZES = { skin: 6, hair: 7, hairColor: 6, suit: 6, extra: 6, mouth: 4 };
 
 const app = express();
 const server = http.createServer(app);
@@ -151,21 +149,11 @@ function joinSentence(start, end) {
 const cleanName = (name) => String(name || '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME) || 'Player';
 const cleanText = (text, max) => String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
+const characterOf = (characterId) => content.politicians.find((c) => c.id === characterId);
+
 function characterInfo(characterId) {
-  const c = content.politicians.find((p) => p.id === characterId);
+  const c = characterOf(characterId);
   return c ? { id: c.id, name: c.name, title: c.title } : null;
-}
-
-const randomLook = () => Object.fromEntries(Object.entries(LOOK_SIZES).map(([k, n]) => [k, Math.floor(Math.random() * n)]));
-
-// Keeps only known parts with in-range choices; anything else keeps the old value.
-function cleanLook(look, old) {
-  const out = { ...old };
-  for (const [k, n] of Object.entries(LOOK_SIZES)) {
-    const v = Number(look?.[k]);
-    if (Number.isInteger(v) && v >= 0 && v < n) out[k] = v;
-  }
-  return out;
 }
 
 const pressOf = (p) => content.journalists.find((j) => j.id === p.pressId) || content.journalists[0];
@@ -225,7 +213,7 @@ class Room {
       bot: p.bot,
       score: p.score,
       character: characterInfo(p.characterId),
-      look: p.look,
+      look: characterOf(p.characterId)?.look || {},
       outlet: pressOf(p).outlet,
       asked: this.asks.has(p.id),
       voted: this.phase === 'pick' && this.questionVotes.has(p.id),
@@ -245,6 +233,13 @@ class Room {
       round: this.round,
       totalRounds: this.totalRounds,
       players: [...this.players.values()].map((p) => this.publicPlayer(p)),
+      // The politicians to pick from in the lobby, and who has each one.
+      characters: this.phase === 'lobby'
+        ? content.politicians.map((c) => ({
+            id: c.id, name: c.name, title: c.title, look: c.look,
+            takenBy: [...this.players.values()].find((p) => p.characterId === c.id)?.id || null,
+          }))
+        : [],
       politicianId: this.politicianId,
       headline: this.headline ? this.headline.text : null,
       // While picking, questions don't say who wrote them.
@@ -570,8 +565,8 @@ class Room {
 
   pickCharacter() {
     const used = new Set([...this.players.values()].map((p) => p.characterId));
-    const free = content.politicians.find((c) => !used.has(c.id));
-    return (free || content.politicians[this.players.size % content.politicians.length]).id;
+    const free = content.politicians.filter((c) => !used.has(c.id));
+    return (free[Math.floor(Math.random() * free.length)] || content.politicians[this.players.size % content.politicians.length]).id;
   }
 
   pickPress() {
@@ -590,18 +585,21 @@ class Room {
       score: 0,
       characterId: this.pickCharacter(),
       pressId: this.pickPress(),
-      look: randomLook(),
       bot,
     };
     this.players.set(id, player);
     return player;
   }
 
-  // Players build their politician's look in the lobby.
-  setLook(playerId, look) {
+  // Players pick their politician in the lobby. A bot gives theirs up and takes a free one.
+  setCharacter(playerId, characterId) {
     if (this.phase !== 'lobby') return { error: 'The game has started' };
+    if (!characterOf(characterId)) return { error: 'Unknown politician' };
     const p = this.players.get(playerId);
-    p.look = cleanLook(look, p.look);
+    const holder = [...this.players.values()].find((o) => o.id !== playerId && o.characterId === characterId);
+    if (holder && !holder.bot) return { error: `${holder.name} already picked them` };
+    p.characterId = characterId;
+    if (holder) holder.characterId = this.pickCharacter();
     this.sendYou(playerId);
     this.broadcast();
     return { ok: true };
@@ -770,7 +768,7 @@ io.on('connection', (socket) => {
       ack(handler(r, socket.data.playerId, data || {}));
     });
   };
-  playerAction('player:look', (r, id, { look }) => r.setLook(id, look));
+  playerAction('player:character', (r, id, { characterId }) => r.setCharacter(id, characterId));
   playerAction('question:submit', (r, id, { text }) => r.submitQuestion(id, text));
   playerAction('vote:question', (r, id, { targetId }) => r.voteQuestion(id, targetId));
   playerAction('answer:submit', (r, id, { text }) => r.submitAnswer(id, text));

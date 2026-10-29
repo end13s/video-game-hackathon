@@ -28,6 +28,7 @@
       <div class="flag right"><div class="pole"></div><svg viewBox="0 0 60 120" xmlns="http://www.w3.org/2000/svg"><use href="#flagCloth"/></svg></div>
     </div>
     <div class="floor"></div>
+    <svg id="side-walls" viewBox="0 0 96 70" xmlns="http://www.w3.org/2000/svg"></svg>
     <div class="tv-camera left"></div>
     <div class="tv-camera right"></div>
     <div class="riser"></div>
@@ -54,10 +55,10 @@
         <linearGradient id="chairShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".4"/></linearGradient>
         <linearGradient id="flagShade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".35"/><stop offset=".3" stop-color="#fff" stop-opacity=".15"/><stop offset=".6" stop-color="#000" stop-opacity=".25"/><stop offset="1" stop-color="#fff" stop-opacity=".1"/></linearGradient>
         <g id="flagCloth">
-          <path d="M4 4 Q30 0 56 6 L54 118 Q30 112 4 116Z" fill="#1d3a8a"/>
-          <path d="M4 40 Q30 36 56 42 L55.5 62 Q30 56 4 60Z" fill="#d7263d"/>
-          <path d="M4 60 Q30 56 55.5 62 L55 70 Q30 64 4 68Z" fill="#f5f6fa"/>
-          <path d="M30 14 l3.5 9 h9.5 l-7.7 5.6 3 9 -7.8 -5.6 -7.8 5.6 3 -9 -7.7 -5.6 h9.5Z" fill="#f4c542"/>
+          <!-- Romania: blue, yellow, red, blue at the pole -->
+          <path d="M4 4 Q12.5 2.2 21 2.6 L21 114.4 Q12.5 115 4 116Z" fill="#002b7f"/>
+          <path d="M21 2.6 Q30 2.4 38.5 3.4 L37.8 113.4 Q30 112.6 21 114.4Z" fill="#fcd116"/>
+          <path d="M38.5 3.4 Q47 4.2 56 6 L54 118 Q46 114 37.8 113.4Z" fill="#ce1126"/>
           <path d="M4 4 Q30 0 56 6 L54 118 Q30 112 4 116Z" fill="url(#flagShade)"/>
         </g>
       </defs>

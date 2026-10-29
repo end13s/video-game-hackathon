@@ -12,14 +12,18 @@ const crypto = require('crypto');
 const content = {
   anchor: { name: 'Dale Brightwater', voiceId: 'nPczCjzI2devNBz1zQrb', voice: { gender: 'male', age: 'middle_aged', words: ['news', 'narrat', 'deep', 'confident', 'broadcast'] } },
 
-  // One per player, handed out in this order. Need at least 6.
+  // Players pick one of these in the lobby (bots get a free one). Cartoon parodies of real
+  // politicians with made-up names; the voices are stock ElevenLabs voices, not imitations.
+  // look: how avatar.js draws them (hair, extra and mouth are names from avatar.js; extra can be a list).
   politicians: [
-    { id: 'p1', name: 'Senator Chet Granite', title: 'Senior Senator, 40 years in office', bio: 'Has never answered a question directly.', voiceId: 'pqHfZKP75CvOlQylNhV4', voice: { gender: 'male', age: 'old', words: ['deep', 'raspy', 'gravel', 'authorit'] } },
-    { id: 'p2', name: 'Mayor Tiffany Sparks', title: 'First-term Mayor', bio: 'Won by eleven votes, all of them her cousins.', voiceId: 'cgSgspJ2msm6clMCkdW9', voice: { gender: 'female', age: 'young', words: ['upbeat', 'bright', 'energetic', 'cheer'] } },
-    { id: 'p3', name: 'Governor Hal Buckley', title: 'Governor and part-time cattle rancher', bio: 'Thinks every problem can be solved with a ribbon cutting.', voiceId: 'CwhRBWXzGAHq8TQ4Fs17', voice: { gender: 'male', age: 'middle_aged', words: ['southern', 'american', 'warm', 'casual'] } },
-    { id: 'p4', name: 'Minister Prudence Vale', title: 'Minister of Very Serious Affairs', bio: 'Has a binder for everything, including this binder.', voiceId: 'Xb7hH8MSUJpSbSDYk0k2', voice: { gender: 'female', age: 'middle_aged', words: ['british', 'crisp', 'confident', 'professional'] } },
-    { id: 'p5', name: 'Rep. Danny "D-Money" Okafor', title: 'Representative, youngest in history', bio: 'Livestreams every vote. Has a merch line.', voiceId: 'TX3LPaxmHKxFdv7VOQHJ', voice: { gender: 'male', age: 'young', words: ['casual', 'energetic', 'friendly', 'social'] } },
-    { id: 'p6', name: 'Press Secretary Gwen Holloway', title: 'Press Secretary', bio: 'Professional spinner. Has never been dizzy.', voiceId: 'EXAVITQu4vr4xnSDxMaL', voice: { gender: 'female', age: 'old', words: ['calm', 'mature', 'smooth', 'sophisticat'] } },
+    { id: 'trump', name: 'Donald Frump', title: 'The Dealmaker', look: { skin: '#f2a65e', hair: 'Swoop', hairColor: '#f0c75a', suit: '#1e2a4a', tie: '#d7263d', extra: 'Tan lines', mouth: 'Pout' }, voiceId: 'CwhRBWXzGAHq8TQ4Fs17', voice: { gender: 'male', age: 'middle_aged', words: ['american', 'confident', 'casual', 'deep'] } },
+    { id: 'obama', name: "Barack O'Banana", title: 'Former President, still has jokes', look: { skin: '#8a5a3c', hair: 'Buzz', hairColor: '#4a4542', suit: '#3a3f4b', tie: '#3b82f6', extra: 'None', ears: 'Big', mouth: 'Grin' }, voiceId: '', voice: { gender: 'male', age: 'middle_aged', words: ['calm', 'smooth', 'warm', 'deep'] } },
+    { id: 'biden', name: 'Joe Bidet', title: 'Former President, aviator enthusiast', look: { skin: '#f6d3b8', hair: 'Combed', hairColor: '#ececec', suit: '#1e2a4a', tie: '#2a5ab8', extra: 'Aviators', mouth: 'Grin' }, voiceId: 'pqHfZKP75CvOlQylNhV4', voice: { gender: 'male', age: 'old', words: ['deep', 'raspy', 'gravel', 'authorit'] } },
+    { id: 'hillary', name: 'Hillary Clingfilm', title: 'Former Secretary of State', look: { skin: '#f5d0b5', hair: 'Bob', hairColor: '#e6c47a', suit: '#2f6db5', tie: 'none', extra: 'Pearls', mouth: 'Smile' }, voiceId: 'EXAVITQu4vr4xnSDxMaL', voice: { gender: 'female', age: 'old', words: ['calm', 'mature', 'smooth', 'sophisticat'] } },
+    { id: 'bernie', name: 'Bernie Sandwiches', title: 'Senator, once again asking', look: { skin: '#f3c9b0', hair: 'Tufts', hairColor: '#f2f2f2', suit: '#5a5f69', tie: '#3a3f4b', extra: 'Glasses', mouth: 'Shouting' }, voiceId: '', voice: { gender: 'male', age: 'old', words: ['raspy', 'gravel', 'loud', 'grump'] } },
+    { id: 'kamala', name: 'Kamala Harrass', title: 'Former Vice President', look: { skin: '#a8714a', hair: 'Bob', hairColor: '#2a1d17', suit: '#1b1f2a', tie: 'none', extra: 'Pearls', mouth: 'Grin' }, voiceId: 'Xb7hH8MSUJpSbSDYk0k2', voice: { gender: 'female', age: 'middle_aged', words: ['crisp', 'confident', 'professional', 'clear'] } },
+    { id: 'bush', name: 'George W. Shrub', title: '43rd President, mission accomplished', look: { skin: '#f1c7a5', hair: 'Side part', hairColor: '#9a958f', suit: '#1e2a4a', tie: '#3b82f6', extra: 'None', ears: 'Big', mouth: 'Smirk' }, voiceId: '', voice: { gender: 'male', age: 'middle_aged', words: ['southern', 'american', 'casual', 'warm'] } },
+    { id: 'lincoln', name: 'Abraham Stinkoln', title: '16th President, honest (allegedly)', look: { skin: '#e2b48c', hair: 'Short', hairColor: '#1f1a17', suit: '#141418', tie: '#141418', extra: 'Lincoln', mouth: 'Smirk' }, voiceId: '', voice: { gender: 'male', age: 'old', words: ['deep', 'wise', 'narrat', 'calm'] } },
   ],
 
   // Each player also gets one of these for the rounds they're a journalist: their outlet,

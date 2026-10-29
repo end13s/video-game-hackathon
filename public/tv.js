@@ -131,6 +131,91 @@ function renderPodium(p, speaking) {
   el.classList.toggle('speaking', speaking);
 }
 
+// The side walls, in perspective so the room reads as a box. The drawing is 96 x 70
+// (rem) on the bottom of the screen: the back wall meets the floor at y 51 (19rem up),
+// between x 15 and 81, and everything vanishes towards (48, 40).
+// A point on a wall: side -1 left / 1 right, k how near the viewer (1 = the back
+// corner, bigger = nearer), h height above the floor.
+function wallPoint(side, k, h) {
+  return [48 + side * 33 * k, 40 + (11 - h) * k];
+}
+function wallQuad(side, k1, k2, h1, h2, attrs) {
+  const pts = [[k1, h1], [k2, h1], [k2, h2], [k1, h2]].map(([k, h]) => wallPoint(side, k, h).map((n) => n.toFixed(2)).join(','));
+  return `<polygon points="${pts.join(' ')}" ${attrs}/>`;
+}
+// Flat things hung on a wall (a sign, a painting): content drawn in a w x h box,
+// skewed onto the wall between k1 and k2, h1 and h2.
+function onWall(side, k1, k2, h1, h2, w, h, inner) {
+  const [kl, kr] = side < 0 ? [k2, k1] : [k1, k2];
+  const [ax, ay] = wallPoint(side, kl, h2);
+  const [bx, by] = wallPoint(side, kr, h2);
+  const [dx, dy] = wallPoint(side, kl, h1);
+  const m = [(bx - ax) / w, (by - ay) / w, (dx - ax) / h, (dy - ay) / h, ax, ay].map((n) => n.toFixed(4));
+  return `<g transform="matrix(${m.join(' ')})">${inner}</g>`;
+}
+
+function buildWalls() {
+  // Panel seams, evenly spaced in depth.
+  const seams = Array.from({ length: 14 }, (_, i) => 1 / (1 - i * 0.045));
+  const wall = (side) => {
+    let svg = wallQuad(side, 1, 2.4, 0, 60, `fill="#1d2850"`);
+    svg += wallQuad(side, 1, 2.4, 35, 60, `fill="#121a38"`);
+    svg += wallQuad(side, 1, 2.4, 33.6, 35, `fill="#b8902a"`);
+    for (const k of seams) {
+      const [x1, y1] = wallPoint(side, k, 9.7);
+      const [x2, y2] = wallPoint(side, k, 33.6);
+      svg += `<path d="M${x1} ${y1} L${x2} ${y2}" stroke="#fff" stroke-opacity=".06" stroke-width=".18"/>`;
+    }
+    // Wood panelling up to the chair rail.
+    svg += wallQuad(side, 1, 2.4, 0, 9, `fill="#4a2b18"`);
+    seams.slice(0, -1).forEach((k, i) => {
+      svg += wallQuad(side, k + 0.006, seams[i + 1] - 0.006, 1.8, 7.6, `fill="#5e3820" stroke="#2e1a0d" stroke-width=".12"`);
+    });
+    svg += wallQuad(side, 1, 2.4, 9, 9.7, `fill="#8a5a36"`);
+    svg += wallQuad(side, 1, 2.4, 0, 1, `fill="#22130a"`);
+    return svg;
+  };
+  const sconce = (side, k, h) => {
+    const [x, y] = wallPoint(side, k, h);
+    return `<circle cx="${x}" cy="${y}" r="${3.2 * k}" fill="url(#sconceGlow)"/>`
+      + onWall(side, k - 0.012, k + 0.012, h - 1.5, h + 0.8, 10, 10,
+        `<path d="M3 10 L7 10 L6 4 L4 4Z" fill="#b8902a"/><ellipse cx="5" cy="3" rx="4" ry="3" fill="#ffe6a8"/>`);
+  };
+  const portrait = (side, k1, k2) => {
+    const face = avatarSvg(randomLook(), TIES[Math.floor(Math.random() * TIES.length)]).replace('<svg ', '<svg x="8" y="8" width="84" height="104" ');
+    return onWall(side, k1, k2, 10, 20, 100, 120,
+      `<rect width="100" height="120" fill="#c9a227"/><rect x="4" y="4" width="92" height="112" fill="#8a6510"/>
+       <rect x="8" y="8" width="84" height="104" fill="#3a2a1a"/>${face}
+       <rect x="8" y="8" width="84" height="104" fill="#5a3a10" opacity=".35"/>`);
+  };
+
+  // Left wall: a door with an exit sign.
+  let left = wall(-1);
+  left += wallQuad(-1, 1.2, 1.42, 0, 18.4, `fill="#8a5a36"`);
+  left += wallQuad(-1, 1.22, 1.4, 0, 17.4, `fill="#3d2312"`);
+  left += wallQuad(-1, 1.24, 1.38, 9.5, 16, `fill="#4a2b18" stroke="#2a170c" stroke-width=".12"`);
+  left += wallQuad(-1, 1.24, 1.38, 1.5, 8.5, `fill="#4a2b18" stroke="#2a170c" stroke-width=".12"`);
+  const [kx, ky] = wallPoint(-1, 1.25, 8.6);
+  left += `<circle cx="${kx}" cy="${ky}" r=".45" fill="#e2b13c"/>`;
+  left += onWall(-1, 1.24, 1.38, 19.2, 21.8, 50, 14,
+    `<rect width="50" height="14" rx="1.5" fill="#1a0d0d"/><text x="25" y="10.8" text-anchor="middle" textLength="36" lengthAdjust="spacingAndGlyphs" font-family="system-ui, sans-serif" font-weight="900" font-size="10" fill="#ff3b3b">EXIT</text>`);
+  left += sconce(-1, 1.1, 24);
+
+  // Right wall: portraits and lights.
+  let right = wall(1);
+  right += portrait(1, 1.06, 1.17) + portrait(1, 1.3, 1.45);
+  right += sconce(1, 1.235, 24);
+
+  $('side-walls').innerHTML = `<defs>
+      <radialGradient id="sconceGlow"><stop offset="0" stop-color="#ffd98a" stop-opacity=".55"/><stop offset="1" stop-color="#ffd98a" stop-opacity="0"/></radialGradient>
+      <linearGradient id="wallShadeL" gradientUnits="userSpaceOnUse" x1="15" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".05"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient>
+      <linearGradient id="wallShadeR" gradientUnits="userSpaceOnUse" x1="81" y1="0" x2="96" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".05"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient>
+    </defs>
+    ${left}${wallQuad(-1, 1, 2.4, 0, 60, 'fill="url(#wallShadeL)"')}
+    ${right}${wallQuad(1, 1, 2.4, 0, 60, 'fill="url(#wallShadeR)"')}
+    <path d="M15 0 L15 51 M81 0 L81 51" stroke="#000" stroke-opacity=".45" stroke-width=".3"/>`;
+}
+
 // The room is seen from the back: rows of chairs face the podium, with an aisle
 // down the middle. Players sit in the front row; the rows behind are filled with
 // background reporters and a few empty chairs.
@@ -237,6 +322,7 @@ function shoot(w) {
   w.el.classList.add('shoot');
 }
 
+buildWalls();
 buildRows();
 startWalkers();
 
