@@ -10,22 +10,22 @@ const path = require('path');
 const crypto = require('crypto');
 
 const content = {
-  anchor: { name: 'Dale Brightwater', voiceId: '', voice: { gender: 'male', age: 'middle_aged', words: ['news', 'narrat', 'deep', 'confident', 'broadcast'] } },
+  anchor: { name: 'Dale Brightwater', voiceId: 'nPczCjzI2devNBz1zQrb', voice: { gender: 'male', age: 'middle_aged', words: ['news', 'narrat', 'deep', 'confident', 'broadcast'] } },
 
   // One per player, handed out in this order. Need at least 6.
   politicians: [
-    { id: 'p1', name: 'Senator Chet Granite', title: 'Senior Senator, 40 years in office', bio: 'Has never answered a question directly.', voiceId: '', voice: { gender: 'male', age: 'old', words: ['deep', 'raspy', 'gravel', 'authorit'] } },
-    { id: 'p2', name: 'Mayor Tiffany Sparks', title: 'First-term Mayor', bio: 'Won by eleven votes, all of them her cousins.', voiceId: '', voice: { gender: 'female', age: 'young', words: ['upbeat', 'bright', 'energetic', 'cheer'] } },
-    { id: 'p3', name: 'Governor Hal Buckley', title: 'Governor and part-time cattle rancher', bio: 'Thinks every problem can be solved with a ribbon cutting.', voiceId: '', voice: { gender: 'male', age: 'middle_aged', words: ['southern', 'american', 'warm', 'casual'] } },
-    { id: 'p4', name: 'Minister Prudence Vale', title: 'Minister of Very Serious Affairs', bio: 'Has a binder for everything, including this binder.', voiceId: '', voice: { gender: 'female', age: 'middle_aged', words: ['british', 'crisp', 'confident', 'professional'] } },
-    { id: 'p5', name: 'Rep. Danny "D-Money" Okafor', title: 'Representative, youngest in history', bio: 'Livestreams every vote. Has a merch line.', voiceId: '', voice: { gender: 'male', age: 'young', words: ['casual', 'energetic', 'friendly', 'social'] } },
-    { id: 'p6', name: 'Press Secretary Gwen Holloway', title: 'Press Secretary', bio: 'Professional spinner. Has never been dizzy.', voiceId: '', voice: { gender: 'female', age: 'old', words: ['calm', 'mature', 'smooth', 'sophisticat'] } },
+    { id: 'p1', name: 'Senator Chet Granite', title: 'Senior Senator, 40 years in office', bio: 'Has never answered a question directly.', voiceId: 'pqHfZKP75CvOlQylNhV4', voice: { gender: 'male', age: 'old', words: ['deep', 'raspy', 'gravel', 'authorit'] } },
+    { id: 'p2', name: 'Mayor Tiffany Sparks', title: 'First-term Mayor', bio: 'Won by eleven votes, all of them her cousins.', voiceId: 'cgSgspJ2msm6clMCkdW9', voice: { gender: 'female', age: 'young', words: ['upbeat', 'bright', 'energetic', 'cheer'] } },
+    { id: 'p3', name: 'Governor Hal Buckley', title: 'Governor and part-time cattle rancher', bio: 'Thinks every problem can be solved with a ribbon cutting.', voiceId: 'CwhRBWXzGAHq8TQ4Fs17', voice: { gender: 'male', age: 'middle_aged', words: ['southern', 'american', 'warm', 'casual'] } },
+    { id: 'p4', name: 'Minister Prudence Vale', title: 'Minister of Very Serious Affairs', bio: 'Has a binder for everything, including this binder.', voiceId: 'Xb7hH8MSUJpSbSDYk0k2', voice: { gender: 'female', age: 'middle_aged', words: ['british', 'crisp', 'confident', 'professional'] } },
+    { id: 'p5', name: 'Rep. Danny "D-Money" Okafor', title: 'Representative, youngest in history', bio: 'Livestreams every vote. Has a merch line.', voiceId: 'TX3LPaxmHKxFdv7VOQHJ', voice: { gender: 'male', age: 'young', words: ['casual', 'energetic', 'friendly', 'social'] } },
+    { id: 'p6', name: 'Press Secretary Gwen Holloway', title: 'Press Secretary', bio: 'Professional spinner. Has never been dizzy.', voiceId: 'EXAVITQu4vr4xnSDxMaL', voice: { gender: 'female', age: 'old', words: ['calm', 'mature', 'smooth', 'sophisticat'] } },
   ],
 
   journalists: [
-    { id: 'j1', name: 'Rita Vance', outlet: 'The Daily Leak', voiceId: '', voice: { gender: 'female', age: 'middle_aged', words: ['news', 'sharp', 'confident', 'clear'] } },
-    { id: 'j2', name: 'Marcus Webb', outlet: 'Channel 9 Action News', voiceId: '', voice: { gender: 'male', age: 'young', words: ['news', 'energetic', 'excited', 'american'] } },
-    { id: 'j3', name: 'Barnaby Thistle', outlet: 'The Quarterly Gazette', voiceId: '', voice: { gender: 'male', age: 'old', words: ['british', 'wise', 'narrat', 'calm'] } },
+    { id: 'j1', name: 'Rita Vance', outlet: 'The Daily Leak', voiceId: 'pFZP5JQG7iQjIQuC4Bku', voice: { gender: 'female', age: 'middle_aged', words: ['news', 'sharp', 'confident', 'clear'] } },
+    { id: 'j2', name: 'Marcus Webb', outlet: 'Channel 9 Action News', voiceId: 'IKne3meq5aSn9XLyUdCD', voice: { gender: 'male', age: 'young', words: ['news', 'energetic', 'excited', 'american'] } },
+    { id: 'j3', name: 'Barnaby Thistle', outlet: 'The Quarterly Gazette', voiceId: 'JBFqnCBsd6RMkjVDRZzb', voice: { gender: 'male', age: 'old', words: ['british', 'wise', 'narrat', 'calm'] } },
   ],
 
   // journalist: id from the list above.
