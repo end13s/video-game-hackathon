@@ -2,6 +2,7 @@
 // hearing:line only add the audio and the subtitle.
 const $ = (id) => document.getElementById(id);
 const socket = io();
+PressAudio.attach(socket); // sound effects, music and the anchor (public/sound.js)
 
 const params = new URLSearchParams(location.search);
 let roomCode = params.get('room');
