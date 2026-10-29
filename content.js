@@ -35,6 +35,16 @@ module.exports = {
   // Used when a player doesn't answer in time.
   stockAnswers: ['No comment.', 'I will not dignify that with a response.', 'Next question.'],
 
+  // Random delivery for answers read on stage: one tag at the start, sometimes a second
+  // one before a later sentence. Only the voice hears them; screens show the clean text.
+  // Tag ideas: https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
+  answerTags: [
+    '[nervous laugh]', '[sighs]', '[sarcastic]', '[whispers]', '[excited]', '[clears throat]',
+    '[laughs]', '[confidently]', '[defensive]', '[crying]', '[snorts]', '[mischievously]',
+    '[exhales]', '[gulps]', '[shouting]', '[starts laughing]',
+  ],
+  secondTagChance: 0.5,
+
   // Bots fill the room when a judge plays alone. They pick one of these at random,
   // so make them funny and general enough to fit any question. Audio tags work here.
   botNames: ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'],

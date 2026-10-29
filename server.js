@@ -98,6 +98,28 @@ const shuffle = (list) => {
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 const randomMs = (min, max) => min + Math.random() * (max - min);
 
+// Models that act out [tags] instead of reading them aloud.
+const TAG_MODELS = ['eleven_v4', 'eleven_v4_turbo', 'eleven_v3', 'eleven_v3_conversational'];
+const ANSWER_TAGS = content.answerTags || [];
+
+const stripTags = (text) => text.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+
+// Gives an answer a random delivery: a tag up front, sometimes another before a later sentence.
+// Answers that already have tags (typed by the player) are left as they are.
+function addDelivery(text) {
+  if (!TAG_MODELS.includes(TTS_MODEL)) return stripTags(text) || text;
+  if (/\[[^\]]+\]/.test(text) || !ANSWER_TAGS.length) return text;
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const first = pick(ANSWER_TAGS);
+  sentences[0] = `${first} ${sentences[0]}`;
+  if (sentences.length > 1 && Math.random() < (content.secondTagChance ?? 0.5)) {
+    const i = 1 + Math.floor(Math.random() * (sentences.length - 1));
+    const second = pick(ANSWER_TAGS.filter((t) => t !== first));
+    sentences[i] = `${second} ${sentences[i]}`;
+  }
+  return sentences.join(' ');
+}
+
 // Rough time to read a line aloud, used when the TV doesn't tell us it finished.
 const speakingMs = (text, max) => Math.min(max, 3000 + text.length * 80);
 
@@ -274,10 +296,17 @@ class Room {
     const active = this.activePlayers();
     const speakers = [...this.players.values()].filter((p) => active.includes(p) || this.answers.has(p.id));
     this.lines = shuffle(speakers).map((p) => {
-      const text = this.answers.get(p.id) || pick(content.stockAnswers);
+      const raw = this.answers.get(p.id) || pick(content.stockAnswers);
+      const speech = addDelivery(raw);
       const character = content.politicians.find((c) => c.id === p.characterId);
       // Start every line now, so the audio is ready by the time its turn comes.
-      return { playerId: p.id, text, audioUrl: speak(text, (character && character.voiceId) || DEFAULT_VOICE_ID) };
+      // Screens get the text without tags; only the voice hears them.
+      return {
+        playerId: p.id,
+        text: stripTags(raw) || raw,
+        speech,
+        audioUrl: speak(speech, (character && character.voiceId) || DEFAULT_VOICE_ID),
+      };
     });
     this.playLine(0);
   }
@@ -287,6 +316,7 @@ class Room {
     this.hearingIndex = index;
     const line = this.lines[index];
     this.setPhase('hearing', { timerMs: speakingMs(line.text, MAX_LINE_MS), onTimeout: () => this.playLine(index + 1) });
+    console.log(`[${this.code}]   says: ${line.speech}`);
     const p = this.players.get(line.playerId);
     this.emit('hearing:line', {
       index,
