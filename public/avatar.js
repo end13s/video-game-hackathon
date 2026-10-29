@@ -101,6 +101,7 @@ function headSvg(p, id) {
     Buzz: `<path d="M28 42 Q27 19 50 19 Q73 19 72 42 Q70 30 62 27.5 Q50 26 38 27.5 Q30 30 28 42Z" fill="${hairFill}"/><path d="M30 34 Q31 24 38 22" stroke="#fff" stroke-width="1.2" opacity=".25" fill="none"/>`,
     Combed: `<path d="M28 43 Q27 22 41 19 Q58 16 70 23 Q74 31 72 43 Q69 31 59 27 Q47 26 37 30 Q31 34 28 43Z" fill="${hairFill}"/><path d="M38 24 Q52 18 66 24M36 28 Q50 22 68 28" stroke="${shade(p.hairC, -0.25)}" stroke-width=".9" fill="none"/>`,
     Bob: `<path d="M27 46 Q25 16 52 16 Q77 18 73 46 Q67 27 47 28 Q36 32 27 46Z" fill="${hairFill}"/><path d="M36 24 Q50 18 66 23" stroke="#fff" stroke-width="1.6" opacity=".25" fill="none"/>`,
+    Wig: `<path d="M28 42 Q26 17 50 16 Q74 17 72 42 Q68 27 50 26 Q32 27 28 42Z" fill="${hairFill}"/><path d="M36 22 Q50 17 64 22" stroke="${shade(p.hairC, -0.2)}" stroke-width="1" fill="none"/><g fill="${hairFill}" stroke="${shade(p.hairC, -0.25)}" stroke-width=".8"><ellipse cx="25" cy="39" rx="5.5" ry="3.8"/><ellipse cx="25" cy="47" rx="5.5" ry="3.8"/><ellipse cx="75" cy="39" rx="5.5" ry="3.8"/><ellipse cx="75" cy="47" rx="5.5" ry="3.8"/></g>`,
     Tufts: `<ellipse cx="43" cy="28" rx="9" ry="4.5" fill="#fff" opacity=".22"/><g fill="${hairFill}"><path d="M30 47 Q21 46 22.5 39 Q18 33 24.5 30 Q24 23 32 25 Q29.5 31 32.5 36 Q28 41 30 47Z"/><path d="M70 47 Q79 46 77.5 39 Q82 33 75.5 30 Q76 23 68 25 Q70.5 31 67.5 36 Q72 41 70 47Z"/></g><path d="M23 33 q-4 -2 -4.5 -7M26 27 q-1 -5 2.5 -7.5M77 33 q4 -2 4.5 -7M74 27 q1 -5 -2.5 -7.5" stroke="${hairFill}" stroke-width="1.3" fill="none" stroke-linecap="round"/><path d="M42 23 Q45 15 50 21 Q54 14 58 22" stroke="${hairFill}" stroke-width="1.6" fill="none" stroke-linecap="round"/>`,
   }[p.hair] || '';
 
@@ -266,6 +267,7 @@ function backSvg(look = {}, tie = '#d7263d', opts = {}) {
     Buzz: skull + cap(17),
     Combed: skull + cap(16) + `<path d="M38 20 Q46 36 44 54M50 18 Q54 36 52 56M60 20 Q62 36 60 54" stroke="${shade(p.hairC, -0.25)}" stroke-width=".9" fill="none"/>`,
     Bob: `<path d="M26 42 Q25 13 50 13 Q75 13 74 42 L76 64 Q50 70 24 64Z" fill="${hairFill}"/>`,
+    Wig: skull + cap(14) + `<g fill="${hairFill}" stroke="${shade(p.hairC, -0.25)}" stroke-width=".8"><ellipse cx="26" cy="38" rx="5.5" ry="3.8"/><ellipse cx="26" cy="46" rx="5.5" ry="3.8"/><ellipse cx="74" cy="38" rx="5.5" ry="3.8"/><ellipse cx="74" cy="46" rx="5.5" ry="3.8"/></g><path d="M46.5 58 L53.5 58 L52.5 76 L47.5 76Z" fill="${hairFill}"/><path d="M42 58 L50 62 L58 58 L58 65 L50 61 L42 65Z" fill="#141414"/>`,
     Tufts: `<ellipse cx="50" cy="40" rx="21" ry="24" fill="url(#face${id})"/><ellipse cx="44" cy="27" rx="8" ry="4" fill="#fff" opacity=".22"/><path d="M28 40 Q28 62 50 63 Q72 62 72 40 Q70 52 50 54 Q30 52 28 40Z" fill="${hairFill}"/>`,
   }[p.hair] || skull + cap();
 
