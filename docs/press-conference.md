@@ -4,7 +4,7 @@
 
 Every round opens with a breaking-news headline about one player's politician, who takes the podium. The others are journalists: they each write a question about the headline on their phone, then vote for the best one (funniest, toughest, whatever they like). The TV reads the winning question in a journalist voice. Then one journalist secretly hacks the teleprompter: they write how the politician's answer starts, and the politician has to finish the sentence. The TV plays the whole answer in the politician's voice while the press heckles (tomatoes, boos, laughs, an approval meter), then the journalists rate it 1–5 stars. The saboteur is revealed at the end of the round. Everyone takes the podium once, then the game is over.
 
-Before the game, everyone builds their politician's look on their phone (skin, hair, suit, face, expression). The TV draws that character in the press room: at the podium when it's their turn, and on the floor as a reporter when it isn't.
+Before the game, everyone picks a politician on their phone from a cast of cartoon parodies of US politicians (Donald Frump, Barack O'Banana, Joe Bidet, Hillary Clingfilm, Bernie Sandwiches, Kamala Harrass, George W. Shrub, Abraham Stinkoln). Each one can only be picked once. The TV draws that character in the press room: at the podium when it's their turn, and on the floor as a reporter when it isn't.
 
 Theme: decides who the politicians are, the headlines, and the look of the room. Elijah writes the characters, outlets, headlines and backup questions in `content.js`.
 
@@ -14,7 +14,7 @@ Each player takes the podium once (set `ROUNDS` in `.env` to play fewer, e.g. 1 
 
 | Phase | Length | What happens |
 |---|---|---|
-| `lobby` | until Start | Players scan the QR code, join and build their politician's look. The TV can add bots |
+| `lobby` | until Start | Players scan the QR code, join and pick their politician. The TV can add bots |
 | `ask` | 40 s, or until every journalist has asked | The next player takes the podium. The anchor reads the round's headline; the TV and phones show it. Journalists type one question each about it. Blank ones get a backup question written for that headline |
 | `pick` | 20 s, or until every journalist has voted | Journalists vote for the best question, not their own. Questions are anonymous. Skipped if there's only one question |
 | `question` | until the TV finishes playing it (max 20 s) | The TV reads the winning question. Most votes wins; ties are settled at random |
@@ -42,7 +42,7 @@ Naming: `subject:action`. The server knows who sent a message from the socket, s
 | Message | Payload | Ack | When |
 |---|---|---|---|
 | `player:join` | `{ roomCode, playerId, name }` | `{ roomCode, you }` or `{ error }` | Tap to join, and after every reconnect. `roomCode` from the page URL |
-| `player:look` | `{ look: { skin, hair, hairColor, suit, extra, mouth } }` (option indexes, see `public/avatar.js`) | `{ ok: true }` or `{ error }` | In the lobby, whenever the player changes their look |
+| `player:character` | `{ characterId }` (an id from `characters` in `game:state`) | `{ ok: true }` or `{ error }` | In the lobby. Taken by another player: error. Taken by a bot: the bot gets a free one |
 | `question:submit` | `{ text }` (max 160 chars) | `{ ok: true }` or `{ error }` | Journalists, during `ask`. Sending again replaces the question |
 | `vote:question` | `{ targetId }` (a question `id` from `game:state`) | `{ ok: true }` or `{ error }` | Journalists, during `pick`. Sending again changes the vote. Can't vote for your own |
 | `answer:submit` | `{ text }` (max 200 chars) | `{ ok: true }` or `{ error }` | Politician, during `answer` |
@@ -82,7 +82,7 @@ If the TV never sends `question:done` or `hearing:done` (no audio, page closed),
 
 | Message | Payload | When |
 |---|---|---|
-| `you` | `{ player, role, question, saboteur, votes: { question, stars } }`: your player, `'politician'` or `'journalist'` this round (`null` in the lobby), your question this round, whether you're writing the teleprompter right now, the question you voted for and your rating | After joining, after your own look, question, vote or rating, and at the start of each phase where you act |
+| `you` | `{ player, role, question, saboteur, votes: { question, stars } }`: your player, `'politician'` or `'journalist'` this round (`null` in the lobby), your question this round, whether you're writing the teleprompter right now, the question you voted for and your rating | After joining, after your own politician, question, vote or rating, and at the start of each phase where you act |
 
 ### `game:state`
 
@@ -96,12 +96,13 @@ If the TV never sends `question:done` or `hearing:done` (no audio, page closed),
   players: [{
     id, name, color, connected, bot, score,
     character: { id, name, title },   // their politician
-    look: { skin, hair, hairColor, suit, extra, mouth },
+    look: { skin, hair, hairColor, suit, tie, extra, mouth }, // their politician's, see public/avatar.js
     outlet,                  // their outlet when they're a journalist
     asked: true,             // wrote a question this round
     voted: false,            // voted in pick
     rated: false,            // rated the answer
   }],
+  characters: [{ id, name, title, look, takenBy }], // only in the lobby: the politicians to pick from
   politicianId,              // who's at the podium, null in the lobby
   headline: '...',           // this round's headline, null in the lobby
   questions: [{ id, text }], // only in pick, otherwise []. id is the author's player id; screens don't show it

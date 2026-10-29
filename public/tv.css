@@ -66,6 +66,9 @@ body[data-screen="pick"] #room, body[data-screen="results"] #room { filter: brig
 }
 .floor::after { content: ''; position: absolute; inset: 0; background: linear-gradient(rgba(0,0,0,.6), transparent 30%); }
 
+/* Drawn by buildWalls() in tv.js, 70rem tall so it reaches the top on any screen shape. */
+#side-walls { position: absolute; left: 0; bottom: 0; width: 96rem; height: 70rem; pointer-events: none; }
+
 .riser {
   position: absolute; left: 50%; bottom: 14rem; width: 52rem; height: 5rem; transform: translateX(-50%);
   background: linear-gradient(#1f2a4f, #0d1430);

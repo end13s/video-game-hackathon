@@ -148,41 +148,30 @@ function render() {
   }
 }
 
-// ---- create your politician -----------------------------------------------
+// ---- pick your politician -------------------------------------------------
 
 function renderCreator(me) {
-  $('my-avatar').innerHTML = avatarSvg(me.look, me.color);
-  $('look-options').innerHTML = Object.entries(LOOK_OPTIONS).map(([key, list]) => {
-    const i = me.look?.[key] ?? 0;
-    const value = list[i];
-    const label = value.startsWith('#') ? `<span class="swatch" style="background:${value}"></span>` : esc(value);
-    return `<div class="look-row">
-      <span class="look-label">${LOOK_LABELS[key]}</span>
-      <button type="button" data-key="${key}" data-step="-1">◀</button>
-      <span class="look-value">${label}</span>
-      <button type="button" data-key="${key}" data-step="1">▶</button>
-    </div>`;
+  $('char-list').innerHTML = (state.characters || []).map((c) => {
+    const holder = playerById(c.takenBy);
+    const mine = c.takenBy === me.id;
+    const taken = holder && !mine && !holder.bot;
+    const note = mine ? 'You' : holder ? `${esc(holder.name)}${holder.bot ? ' · tap to steal' : ''}` : '';
+    return `<button type="button" class="char-card ${mine ? 'mine' : ''}" data-id="${c.id}" ${taken ? 'disabled' : ''}>
+      <span class="char-face">${avatarSvg(c.look, mine ? me.color : '#d7263d')}</span>
+      <strong>${esc(c.name)}</strong>
+      <small>${esc(c.title)}</small>
+      ${note ? `<span class="char-taken">${note}</span>` : ''}
+    </button>`;
   }).join('');
 }
 
-function sendLook(look) {
-  // Draw right away; the server echoes it back to everyone.
-  you.player.look = look;
-  const me = playerById(you.player.id);
-  if (me) me.look = look;
-  render();
-  socket.emit('player:look', { look }, () => {});
-}
-
-$('look-options').onclick = (e) => {
-  const btn = e.target.closest('button');
-  if (!btn) return;
-  const key = btn.dataset.key;
-  const n = LOOK_OPTIONS[key].length;
-  const current = (playerById(you.player.id) || you.player).look || {};
-  sendLook({ ...current, [key]: ((current[key] ?? 0) + Number(btn.dataset.step) + n) % n });
+$('char-list').onclick = (e) => {
+  const btn = e.target.closest('.char-card');
+  if (!btn || btn.disabled || btn.classList.contains('mine')) return;
+  socket.emit('player:character', { characterId: btn.dataset.id }, (res) => {
+    $('char-error').textContent = res?.error || '';
+  });
 };
-$('randomise').onclick = () => sendLook(randomLook());
 
 // ---- ask (journalists) -----------------------------------------------------
 
