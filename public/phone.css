@@ -89,7 +89,9 @@ body[data-screen="create"] [data-screen="create"],
 body[data-screen="ask"] [data-screen="ask"],
 body[data-screen="podium"] [data-screen="podium"],
 body[data-screen="pick"] [data-screen="pick"],
-body[data-screen="rate"] [data-screen="rate"] { display: flex; }
+body[data-screen="rate"] [data-screen="rate"],
+body[data-screen="sabotage"] [data-screen="sabotage"],
+body[data-screen="heckle"] [data-screen="heckle"] { display: flex; }
 section[data-screen="podium"] { justify-content: center; }
 .center { text-align: center; }
 .prompt { margin: 0; font-size: 19px; font-weight: 600; }
@@ -117,3 +119,23 @@ section[data-screen="podium"] { justify-content: center; }
   margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--white); color: var(--navy);
   border-left: 8px solid var(--red); font-size: 20px; font-weight: 900; line-height: 1.2;
 }
+
+.exit {
+  border: 1px solid var(--muted); border-radius: 8px; background: none; color: var(--muted);
+  font: inherit; font-size: 13px; font-weight: 700; padding: 4px 10px;
+}
+.exit.confirm { border-color: var(--red); background: var(--red); color: #fff; }
+.teleprompter {
+  margin: 0; padding: 14px; border-radius: 10px; background: #000; color: #7dffa1;
+  font: 700 18px/1.35 ui-monospace, Menlo, monospace; border: 2px solid #1f3d2a;
+}
+.teleprompter::after { content: '…'; }
+.heckles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.heckles button {
+  height: 64px; border: 0; border-radius: 14px; background: var(--navy-2); color: var(--white);
+  font: inherit; font-size: 28px; font-weight: 900; transition: transform .08s;
+}
+.heckles button:active { transform: scale(.92); background: #2a3b6e; }
+.heckles button.word { font-size: 17px; letter-spacing: .04em; background: var(--red); }
+.big-heckles button { height: 96px; font-size: 40px; }
+.big-heckles button.word { font-size: 22px; }

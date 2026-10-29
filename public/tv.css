@@ -309,3 +309,52 @@ body[data-phase="rate"] .rate-bar { display: flex; }
   border: 0; border-radius: .6rem; padding: .6rem 1.4rem; cursor: pointer;
   background: var(--gold); color: var(--navy); font: inherit; font-size: 1.4rem; font-weight: 800;
 }
+
+/* ---- exit ----------------------------------------------------------------- */
+.exit-btn {
+  border: .15rem solid rgba(255,255,255,.35); border-radius: .5rem; padding: .5rem 1rem; cursor: pointer;
+  background: rgba(11,21,48,.7); color: var(--muted); font: inherit; font-size: 1.1rem; font-weight: 700;
+}
+.exit-btn.confirm { background: var(--red); border-color: var(--red); color: #fff; }
+body[data-phase="lobby"] .exit-btn { display: none; }
+
+/* ---- teleprompter --------------------------------------------------------- */
+.prompter {
+  display: none; position: absolute; left: 2.5rem; top: 15.5rem; width: 30rem; transform: perspective(40rem) rotateY(12deg);
+  padding: 1rem 1.4rem; border-radius: .6rem; background: rgba(0,0,0,.88); border: .3rem solid #2b3a30;
+  box-shadow: 0 0 2rem rgba(125,255,161,.25); z-index: 2;
+}
+body[data-phase="sabotage"] .prompter, body[data-phase="answer"] .prompter { display: block; }
+.prompter-label { margin: 0 0 .3rem; font-size: .9rem; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: #3f8f5a; }
+.prompter-text { margin: 0; font: 700 1.9rem/1.3 ui-monospace, Menlo, monospace; color: #7dffa1; text-shadow: 0 0 .6rem rgba(125,255,161,.6); }
+.prompter-text.hacking { animation: glitch .25s steps(2) infinite; color: #ff6b6b; text-shadow: 0 0 .6rem rgba(255,80,80,.7); }
+@keyframes glitch { 50% { transform: translateX(.3rem) skewX(-8deg); opacity: .7; } }
+mark.opener { background: #0b0f0c; color: #7dffa1; padding: 0 .3rem; border-radius: .3rem; font-family: ui-monospace, Menlo, monospace; }
+
+/* ---- heckling ------------------------------------------------------------- */
+#fx { position: fixed; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
+.pop { position: absolute; font-size: 3.4rem; transform: translate(-50%, -50%); animation: pop 1.6s ease-out forwards; text-shadow: 0 .3rem .8rem rgba(0,0,0,.5); }
+.pop.word { font-size: 2.2rem; font-weight: 900; color: #fff; background: var(--red); padding: .2rem .8rem; border-radius: .4rem; }
+@keyframes pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.4); }
+  15% { opacity: 1; transform: translate(-50%, -90%) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, -500%) scale(1); }
+}
+.tomato { position: absolute; font-size: 3rem; transform: translate(-50%, -50%); }
+.splat { position: absolute; font-size: 5rem; transform: translate(-50%, -50%); animation: splat 1.2s ease-out forwards; }
+@keyframes splat { 0% { transform: translate(-50%, -50%) scale(.3); } 20% { transform: translate(-50%, -50%) scale(1.3, .8); } 100% { opacity: 0; transform: translate(-50%, -20%) scale(1.2, .9); } }
+
+.meter {
+  display: none; position: absolute; right: 4rem; top: 15rem; width: 2.4rem; height: 18rem; z-index: 2;
+  border-radius: 1.2rem; background: rgba(11,21,48,.85); border: .2rem solid rgba(255,255,255,.3); overflow: hidden;
+}
+body[data-phase="hearing"] .meter, body[data-phase="rate"] .meter { display: block; }
+.meter-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 50%; background: linear-gradient(#22c55e, #eab308 50%, #ef4444); background-size: 100% 18rem; background-position: bottom; transition: height .3s; }
+.meter-label { position: absolute; left: 50%; bottom: -2.2rem; transform: translateX(-50%); font-size: .9rem; font-weight: 800; text-transform: uppercase; white-space: nowrap; }
+.meter { overflow: visible; }
+#politician.sweat::after {
+  content: '💦'; position: absolute; left: 68%; top: 8%; font-size: 2.4rem; animation: drip 1s ease-in infinite;
+}
+@keyframes drip { from { transform: translateY(0); opacity: 1; } to { transform: translateY(3rem); opacity: 0; } }
+#politician.hit svg { animation: flinch .4s ease-out; }
+@keyframes flinch { 30% { transform: translateX(-.8rem) rotate(-4deg); } }

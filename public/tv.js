@@ -44,6 +44,7 @@ socket.on('game:state', render);
 socket.on('headline:read', onHeadline);
 socket.on('question:ask', onQuestion);
 socket.on('hearing:line', onHearingLine);
+socket.on('crowd:react', onReact);
 
 // ---- join QR ---------------------------------------------------------------
 
@@ -66,7 +67,7 @@ function showJoinQr() {
 
 // ---- render ----------------------------------------------------------------
 
-const SCREEN = { question: 'stage', answer: 'stage', hearing: 'stage', rate: 'stage', final: 'results' };
+const SCREEN = { question: 'stage', sabotage: 'stage', answer: 'stage', hearing: 'stage', rate: 'stage', final: 'results' };
 
 function render(s) {
   const prevPhase = state.phase;
@@ -96,7 +97,8 @@ function render(s) {
     $('picked').textContent = journalists.filter((p) => p.voted).length;
     if (entered) renderPick();
   }
-  if (['question', 'answer', 'hearing', 'rate'].includes(s.phase)) renderStage(politician, entered);
+  if (['question', 'sabotage', 'answer', 'hearing', 'rate'].includes(s.phase)) renderStage(politician, entered);
+  if (s.phase === 'hearing' && entered) setApproval(50);
   if (s.phase === 'rate') $('rated').textContent = journalists.filter((p) => p.rated).length;
   if ((s.phase === 'results' || s.phase === 'final') && entered) renderResults();
 
@@ -149,9 +151,9 @@ function chairSvg() {
   </svg></div>`;
 }
 
-function seatHtml(x, row, inner, extra = '') {
+function seatHtml(x, row, inner, extra = '', playerId = '') {
   const dim = row.dim ? ` filter:brightness(${row.dim});` : '';
-  return `<div class="seat ${extra}" style="left:${x}%; bottom:${row.bottom}rem; width:${row.w}rem; height:${row.w * 1.75}rem;${dim}">${inner}</div>`;
+  return `<div class="seat ${extra}" ${playerId ? `data-id="${esc(playerId)}"` : ''} style="left:${x}%; bottom:${row.bottom}rem; width:${row.w}rem; height:${row.w * 1.75}rem;${dim}">${inner}</div>`;
 }
 
 function buildRows() {
@@ -174,7 +176,7 @@ let pressKey = '';
 function renderPress() {
   const inRound = state.phase !== 'lobby';
   const people = state.players.filter((p) => p.connected && (!inRound || p.id !== state.politicianId));
-  const spotlightId = ['question', 'answer', 'hearing', 'rate'].includes(state.phase) ? state.chosen?.journalistId : null;
+  const spotlightId = ['question', 'sabotage', 'answer', 'hearing', 'rate'].includes(state.phase) ? state.chosen?.journalistId : null;
   const askerId = state.phase === 'question' ? spotlightId : null;
   const key = JSON.stringify([people.map((p) => [p.id, p.look]), inRound, spotlightId, askerId]);
   if (key === pressKey) return;
@@ -187,7 +189,7 @@ function renderPress() {
     const standing = p.id === spotlightId;
     const figure = `<div class="person">${backSvg(p.look, p.color, { pose: p.id === askerId ? 'raise' : null })}</div>`;
     const plate = `<span class="plate" style="--c:${p.color}">${esc(p.name)}${inRound ? `<small>${esc(p.outlet)}</small>` : ''}</span>`;
-    return seatHtml(x, FRONT_ROW, figure + chairSvg() + plate, standing ? 'standing' : '');
+    return seatHtml(x, FRONT_ROW, figure + chairSvg() + plate, standing ? 'standing' : '', p.id);
   }).join('');
 }
 
@@ -244,15 +246,26 @@ function renderStage(politician, entered) {
   const asker = playerById(c.journalistId);
   $('asker').textContent = asker ? `${asker.name} (${asker.outlet})` : 'The press';
   $('question-text').textContent = c.question;
-  $('stage-status').textContent = state.phase === 'answer' ? `${charName(politician)} is writing a dodge…` : '';
-  if (entered && ['question', 'answer'].includes(state.phase)) $('subtitle').classList.add('hidden');
+  const status = {
+    sabotage: '⚠ Someone in the press is hacking the teleprompter…',
+    answer: `${charName(politician)} has to finish the teleprompter's sentence…`,
+  };
+  $('stage-status').textContent = status[state.phase] || '';
+  if (entered && ['question', 'sabotage', 'answer'].includes(state.phase)) $('subtitle').classList.add('hidden');
+  // The teleprompter glitches while it's being hacked, then shows what was written.
+  $('prompter-text').classList.toggle('hacking', state.phase === 'sabotage');
+  $('prompter-text').textContent = state.phase === 'sabotage' ? '▓▒░ H4CK1NG ░▒▓' : `${c.opener || ''}…`;
+  if (entered && state.phase === 'sabotage') cameraFlashes(2);
   // The answer stays up while the press rates it, also after a TV refresh.
-  if (state.phase === 'rate' && c.answer) showSubtitle(politician, c.answer);
+  if (state.phase === 'rate' && c.answer) showSubtitle(politician, c.answer, c.opener);
 }
 
-function showSubtitle(p, text) {
+// The teleprompter's part of the answer is marked, so the room sees the setup.
+function showSubtitle(p, text, opener) {
   $('sub-name').textContent = `${charName(p)}${p ? ` (${p.name})` : ''}`;
-  $('sub-text').textContent = text;
+  const safe = esc(text);
+  const start = opener ? esc(opener) : '';
+  $('sub-text').innerHTML = start && safe.startsWith(start) ? `<mark class="opener">${start}</mark>${safe.slice(start.length)}` : safe;
   $('subtitle').style.setProperty('--c', p?.color || '');
   $('subtitle').classList.remove('hidden');
 }
@@ -273,6 +286,7 @@ function setTicker() {
     question: 'Live: the press asks the question everyone was afraid of',
     answer: 'Sources say a dodge is being prepared',
     pick: 'Developing: the press room votes on the question to ask',
+    sabotage: 'Technical difficulties: the teleprompter appears to have been tampered with',
     hearing: 'Live: the politician responds · Fact checkers are on standby',
     rate: 'Viewers decide: how good was that dodge?',
     results: 'Polls are closed · Results are in',
@@ -330,8 +344,8 @@ function onQuestion({ round, audioUrl }) {
   play(audioUrl, () => socket.emit('question:done', { round }));
 }
 
-function onHearingLine({ round, playerId, text, audioUrl }) {
-  showSubtitle(playerById(playerId), text);
+function onHearingLine({ round, playerId, text, opener, audioUrl }) {
+  showSubtitle(playerById(playerId), text, opener);
   cameraFlashes(2);
   play(audioUrl, () => socket.emit('hearing:done', { round }));
 }
@@ -362,7 +376,11 @@ function renderResults() {
   const ratingHtml = politician && rating.count
     ? `<div class="highlight">${face(politician, 'small')}<span><small>Answer rating · +${points[politician.id] || 0}</small><strong>${esc(charName(politician))}</strong><span class="stars">${stars(rating.average)}</span> ${rating.average} / 5</span></div>`
     : '';
-  $('highlights').innerHTML = final ? '' : ratingHtml + bestHtml;
+  const saboteur = playerById(state.results?.saboteurId);
+  const hackHtml = saboteur
+    ? `<div class="highlight">${face(saboteur, 'small')}<span><small>Hacked the teleprompter 😈</small><strong>${esc(saboteur.name)}</strong>“${esc(state.chosen?.opener)}…”</span></div>`
+    : '';
+  $('highlights').innerHTML = final ? '' : ratingHtml + bestHtml + hackHtml;
 
   const ranked = [...state.players].sort((a, b) => b.score - a.score);
   const top = ranked[0]?.score;
@@ -380,6 +398,76 @@ function renderResults() {
   cameraFlashes(final ? 8 : 4);
 }
 
+// ---- heckling -------------------------------------------------------------
+
+const HECKLE = {
+  laugh: { icon: '😂', sound: 'laugh', approval: 4 },
+  applause: { icon: '👏', sound: 'applause', approval: 7 },
+  gasp: { icon: '😱', sound: 'gasp', approval: -2 },
+  boo: { icon: '👎', sound: 'boo', approval: -6 },
+  tomato: { icon: '🍅', sound: 'boo', approval: -8 },
+  liar: { icon: 'LIAR!', sound: 'gasp', approval: -6 },
+};
+let approval = 50;
+
+function setApproval(value) {
+  approval = Math.max(0, Math.min(100, value));
+  $('meter-fill').style.height = `${approval}%`;
+  $('politician').classList.toggle('sweat', approval < 35);
+}
+
+// Where on screen something comes from or flies to.
+function centerOf(el, yFrac = 0.3) {
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height * yFrac };
+}
+
+function onReact({ playerId, type }) {
+  const h = HECKLE[type];
+  if (!h) return;
+  const seat = document.querySelector(`#press .seat[data-id="${CSS.escape(playerId)}"]`);
+  const from = seat ? centerOf(seat) : { x: innerWidth * (0.2 + Math.random() * 0.6), y: innerHeight * 0.85 };
+  window.PressAudio?.sfx(h.sound, 0.35);
+  setApproval(approval + h.approval);
+  if (type === 'tomato') return throwTomato(from);
+  const el = document.createElement('div');
+  el.className = `pop${h.icon.length > 2 ? ' word' : ''}`;
+  el.textContent = h.icon;
+  el.style.left = `${from.x + (Math.random() - 0.5) * 40}px`;
+  el.style.top = `${from.y}px`;
+  $('fx').appendChild(el);
+  setTimeout(() => el.remove(), 1700);
+}
+
+// A tomato arcs from the reporter's seat to the podium and splats.
+function throwTomato(from) {
+  const to = centerOf($('politician'), 0.25);
+  to.x += (Math.random() - 0.5) * 80;
+  const el = document.createElement('div');
+  el.className = 'tomato';
+  el.textContent = '🍅';
+  $('fx').appendChild(el);
+  const peak = Math.min(from.y, to.y) - 160;
+  const flight = el.animate([
+    { left: `${from.x}px`, top: `${from.y}px`, transform: 'translate(-50%, -50%) rotate(0deg)' },
+    { left: `${(from.x + to.x) / 2}px`, top: `${peak}px`, transform: 'translate(-50%, -50%) rotate(360deg)' },
+    { left: `${to.x}px`, top: `${to.y}px`, transform: 'translate(-50%, -50%) rotate(720deg)' },
+  ], { duration: 700, easing: 'ease-in' });
+  flight.onfinish = () => {
+    el.remove();
+    const splat = document.createElement('div');
+    splat.className = 'splat';
+    splat.textContent = '💥';
+    splat.style.left = `${to.x}px`;
+    splat.style.top = `${to.y}px`;
+    $('fx').appendChild(splat);
+    setTimeout(() => splat.remove(), 1300);
+    $('politician').classList.remove('hit');
+    void $('politician').offsetWidth;
+    $('politician').classList.add('hit');
+  };
+}
+
 // ---- host controls ---------------------------------------------------------
 
 function start() {
@@ -390,6 +478,26 @@ function start() {
 }
 $('start').onclick = start;
 $('again').onclick = start;
+// Exit to the lobby (the main menu). Press twice: the first press asks to confirm.
+let exitTimer = null;
+function exitToMenu() {
+  if (state.phase === 'lobby') return;
+  if (!$('exit').classList.contains('confirm')) {
+    $('exit').classList.add('confirm');
+    $('exit').textContent = 'Press again to end the game';
+    exitTimer = setTimeout(resetExit, 3000);
+    return;
+  }
+  resetExit();
+  socket.emit('game:reset');
+}
+function resetExit() {
+  clearTimeout(exitTimer);
+  $('exit').classList.remove('confirm');
+  $('exit').textContent = 'Exit to menu (Esc)';
+}
+$('exit').onclick = exitToMenu;
+
 $('add-bot').onclick = () => socket.emit('bot:add', (res) => ($('start-error').textContent = res?.error || ''));
 
 document.addEventListener('keydown', (e) => {
@@ -397,4 +505,5 @@ document.addEventListener('keydown', (e) => {
   if ((e.key === 'b' || e.key === 'B') && state.phase === 'lobby') $('add-bot').click();
   if (e.key === 'n' || e.key === 'N') socket.emit('phase:next');
   if (e.key === 'r' || e.key === 'R') socket.emit('game:reset');
+  if (e.key === 'Escape') exitToMenu();
 });
