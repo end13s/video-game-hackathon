@@ -5,7 +5,8 @@
   "description": "Party game for the Chroma Awards game jam: TV screen plus phones as controllers.",
   "scripts": {
     "start": "node server.js",
-    "phone-test": "node tools/phone-test/server.js"
+    "phone-test": "node tools/phone-test/server.js",
+    "bots": "node tools/bots.js"
   },
   "dependencies": {
     "dotenv": "^18.0.9",

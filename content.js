@@ -34,4 +34,17 @@ module.exports = {
 
   // Used when a player doesn't answer in time.
   stockAnswers: ['No comment.', 'I will not dignify that with a response.', 'Next question.'],
+
+  // Bots fill the room when a judge plays alone. They pick one of these at random,
+  // so make them funny and general enough to fit any question. Audio tags work here.
+  botNames: ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'],
+  botAnswers: [
+    'Let me be absolutely clear: I have no idea what you are talking about.',
+    'That is a great question, and I will answer it right after the election.',
+    'I was not there. And if I was there, I was not paying attention.',
+    'My opponent would love for you to ask that. Next question!',
+    'I take full responsibility, and I blame my staff.',
+    '[sighs] Look. We all make mistakes. Mine were just bigger.',
+    'Absolutely not. Well, maybe. Probably yes.',
+  ],
 };
