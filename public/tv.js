@@ -1,175 +1,218 @@
+// TV screen. Redraws everything from the latest game:state; question:ask and
+// hearing:line only add the audio and the subtitle.
 const $ = (id) => document.getElementById(id);
 const socket = io();
 
-const DOT_RADIUS = 24;
-const DOT_SPEED = 8; // px per physics step at full input
+let state = { phase: 'lobby', players: [], round: 0 };
+let endsAt = null; // local time the current phase ends, from remainingMs
 
-let players = [];
-let voiceEnabled = false;
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+function playerById(id) {
+  return state.players.find((p) => p.id === id);
+}
+function charName(p) {
+  return p?.character?.name || p?.name || '???';
+}
+function setAll(selector, text) {
+  for (const el of document.querySelectorAll(selector)) el.textContent = text;
+}
 
-// ---- join QR ----------------------------------------------------------------
+// ---- connection ------------------------------------------------------------
+
+socket.on('connect', () => {
+  $('offline').classList.add('hidden');
+  socket.emit('tv:join', (res) => render(res.state));
+});
+socket.on('disconnect', () => $('offline').classList.remove('hidden'));
+socket.on('game:state', render);
+socket.on('question:ask', onQuestion);
+socket.on('hearing:line', onHearingLine);
+
+// ---- join QR ---------------------------------------------------------------
 
 fetch('/config')
   .then((r) => r.json())
   .then((config) => {
-    voiceEnabled = config.voiceEnabled;
-    const joinUrl = `${config.publicUrl || window.location.origin}/`;
-    $('qr').src = `/qr.svg?text=${encodeURIComponent(joinUrl)}`;
+    const joinUrl = `${(config.publicUrl || location.origin).replace(/\/$/, '')}/`;
+    $('qr').innerHTML = `<img src="/qr.svg?text=${encodeURIComponent(joinUrl)}" alt="QR code to join" style="width:100%;height:100%">`;
     $('join-url').textContent = joinUrl;
-    const host = new URL(joinUrl).hostname;
-    $('url-warning').classList.toggle('hidden', !['localhost', '127.0.0.1', '::1'].includes(host));
-    if (!voiceEnabled) $('speak-text').disabled = true;
-  });
+    $('url-warning').classList.toggle('hidden', !/localhost|127\.0\.0\.1/.test(joinUrl));
+  })
+  .catch(() => ($('join-url').textContent = 'Could not load /config'));
 
-// ---- players and phases -----------------------------------------------------
+// ---- render ----------------------------------------------------------------
 
-function renderPlayers() {
-  $('player-count').textContent = `(${players.length})`;
-  $('players').innerHTML = players
-    .map((p) => `<li class="${p.connected ? '' : 'away'}"><i style="background:${p.color}"></i>${esc(p.name)}</li>`)
-    .join('');
+function render(s) {
+  const prev = state.phase;
+  state = s;
+  endsAt = s.remainingMs == null ? null : Date.now() + s.remainingMs;
+  document.body.dataset.phase = s.phase;
+  const entered = s.phase !== prev;
+
+  const connected = s.players.filter((p) => p.connected);
+  setAll('.total', connected.length);
+  setAll('.round-tag', s.round ? `Round ${s.round} of ${s.totalRounds}` : '');
+  if (s.question) {
+    setAll('.journalist', `${s.question.journalist.name}, ${s.question.journalist.outlet}`);
+    setAll('.question-text', s.question.text);
+  }
+
+  if (s.phase === 'lobby') renderLobby();
+  if (s.phase === 'answer') $('answered').textContent = s.players.filter((p) => p.answered).length;
+  if (s.phase === 'hearing') {
+    if (entered) $('subtitle').classList.add('hidden');
+    renderPodiums();
+  }
+  if (s.phase === 'vote') {
+    $('voted').textContent = s.players.filter((p) => p.voted).length;
+    if (entered) renderVoteAnswers();
+  }
+  if ((s.phase === 'results' || s.phase === 'final') && entered) renderResults();
+
+  if (entered) setTicker();
 }
 
-function showPhase(phase) {
-  $('phase-name').textContent = phase;
-  for (const el of document.querySelectorAll('[data-phase]')) el.classList.toggle('hidden', el.dataset.phase !== phase);
+function renderLobby() {
+  const { players } = state;
+  $('lobby-players').innerHTML = players.length
+    ? players.map((p) => `<li style="--c:${p.color}" class="${p.connected ? '' : 'off'}">
+        <span class="pname">${esc(p.name)}</span><span class="pchar">${esc(charName(p))}</span></li>`).join('')
+    : '<li class="empty">Waiting for politicians…</li>';
+  $('start').disabled = !players.some((p) => p.connected);
 }
 
-socket.on('connect', () => {
-  socket.emit('tv:join', (state) => {
-    players = state.players;
-    renderPlayers();
-    showPhase(state.phase);
-  });
-});
-socket.on('players', (msg) => {
-  players = msg.players;
-  renderPlayers();
-});
-socket.on('phase', ({ phase }) => showPhase(phase));
-$('next-phase').addEventListener('click', () => socket.emit('phase:next'));
+// Counts down locally from remainingMs, so phone and laptop clocks don't matter.
+setInterval(() => {
+  const left = endsAt ? Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)) : null;
+  $('timer').classList.toggle('hidden', left === null);
+  if (left === null) return;
+  $('timer-num').textContent = left;
+  $('timer').classList.toggle('low', left <= 5);
+}, 200);
 
-// ---- input from phones ------------------------------------------------------
+function setTicker() {
+  const lines = {
+    lobby: 'Breaking: politicians gather for emergency press conference · Scan the QR code to take the podium',
+    question: 'Developing: journalist asks the question everyone was afraid of',
+    answer: 'Sources say the statements are being drafted right now',
+    hearing: 'Live: the politicians respond · Fact checkers are on standby',
+    vote: 'Viewers decide: vote on your phone for the best answer',
+    results: 'Polls are closed · Results are in',
+    final: 'Final results · The press conference is over',
+  };
+  const text = lines[state.phase] || '';
+  $('ticker-text').textContent = `${text}   ★   ${text}`;
+}
 
-// playerId -> { jx, jy, tx, ty }
-const inputs = new Map();
-socket.on('player:input', ({ playerId, ...input }) => inputs.set(playerId, input));
+function cameraFlashes(n) {
+  for (let i = 0; i < n; i++) {
+    setTimeout(() => {
+      $('flash').classList.remove('on');
+      void $('flash').offsetWidth;
+      $('flash').classList.add('on');
+    }, i * 250 + Math.random() * 150);
+  }
+}
 
-const flashes = new Map(); // playerId -> time of last button press
-socket.on('player:button', ({ playerId, button }) => flashes.set(playerId, { at: performance.now(), button }));
-
-socket.on('player:text', ({ playerId, text }) => {
-  const p = players.find((pl) => pl.id === playerId);
-  const div = document.createElement('div');
-  div.innerHTML = `<b style="color:${p ? p.color : '#fff'}">${esc(p ? p.name : '?')}:</b> ${esc(text)}`;
-  $('feed').prepend(div);
-  if ($('speak-text').checked) speak(text);
-});
-
-// ---- text-to-speech playback ------------------------------------------------
+// ---- audio -----------------------------------------------------------------
 
 const audio = new Audio();
-const speakQueue = [];
-let speaking = false;
 
 // Browsers block audio until the page has been clicked once.
-$('sound-btn').addEventListener('click', () => {
+function unlockSound() {
   audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
-  audio.play().catch(() => {});
-  $('sound-btn').textContent = 'Sound enabled';
-  $('sound-btn').classList.add('on');
-});
-
-async function speak(text, voiceId) {
-  if (!voiceEnabled) return;
-  const res = await fetch('/api/speak', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voiceId }),
-  });
-  const body = await res.json();
-  if (!res.ok) return console.warn('speak failed:', body.error);
-  speakQueue.push(body.url);
-  playNext();
+  audio.play().then(() => $('sound').classList.add('hidden')).catch(() => {});
 }
+$('sound').onclick = unlockSound;
 
-function playNext() {
-  if (speaking || !speakQueue.length) return;
-  speaking = true;
-  audio.src = speakQueue.shift();
-  audio.onended = audio.onerror = () => {
-    speaking = false;
-    playNext();
-  };
+// Plays url and calls onDone when it ends. If there's no audio or it fails,
+// onDone is skipped and the server moves on by itself after a reading time.
+function play(url, onDone) {
+  audio.onended = audio.onerror = null;
+  if (!url) return;
+  audio.src = url;
+  audio.onended = onDone;
   audio.play().catch((err) => {
-    console.warn('audio blocked, click "Enable sound":', err.message);
-    speaking = false;
+    console.warn('audio blocked, click "enable sound":', err.message);
+    $('sound').classList.remove('hidden');
   });
 }
 
-// ---- Phaser: one dot per player, moved by joystick or tilt -------------------
-
-class InputScene extends Phaser.Scene {
-  constructor() {
-    super('input');
-    this.dots = new Map(); // playerId -> { body, label }
-  }
-
-  create() {
-    this.matter.world.setBounds(0, 0, this.scale.width, this.scale.height);
-    this.scale.on('resize', (size) => this.matter.world.setBounds(0, 0, size.width, size.height));
-  }
-
-  addDot(player) {
-    const x = Phaser.Math.Between(100, this.scale.width - 100);
-    const y = Phaser.Math.Between(100, this.scale.height - 100);
-    const color = Phaser.Display.Color.HexStringToColor(player.color).color;
-    const circle = this.add.circle(x, y, DOT_RADIUS, color);
-    const body = this.matter.add.gameObject(circle, { shape: { type: 'circle', radius: DOT_RADIUS }, frictionAir: 0.2 });
-    body.setFixedRotation();
-    const label = this.add.text(x, y - DOT_RADIUS - 16, player.name, { fontSize: '16px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
-    const dot = { body, label };
-    this.dots.set(player.id, dot);
-    return dot;
-  }
-
-  update() {
-    const now = performance.now();
-    const ids = new Set(players.map((p) => p.id));
-    for (const [id, dot] of this.dots) {
-      if (!ids.has(id)) {
-        dot.body.destroy();
-        dot.label.destroy();
-        this.dots.delete(id);
-      }
-    }
-
-    for (const player of players) {
-      const dot = this.dots.get(player.id) || this.addDot(player);
-      const input = inputs.get(player.id) || { jx: 0, jy: 0, tx: 0, ty: 0 };
-      // Joystick wins while it's being used, otherwise tilt.
-      const useStick = Math.hypot(input.jx, input.jy) > 0.05;
-      const ix = useStick ? input.jx : input.tx;
-      const iy = useStick ? input.jy : input.ty;
-      dot.body.setVelocity(ix * DOT_SPEED, iy * DOT_SPEED);
-
-      const flash = flashes.get(player.id);
-      const pressed = flash && now - flash.at < 150;
-      if (pressed) dot.body.setStrokeStyle(6, 0xffffff);
-      else dot.body.setStrokeStyle();
-      dot.body.setAlpha(player.connected ? 1 : 0.3);
-      dot.label.setText(pressed ? `${player.name} [${flash.button.toUpperCase()}]` : player.name);
-      dot.label.setPosition(dot.body.x, dot.body.y - DOT_RADIUS - 16);
-    }
-  }
+function onQuestion({ round, audioUrl }) {
+  cameraFlashes(4);
+  play(audioUrl, () => socket.emit('question:done', { round }));
 }
 
-new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: 'game',
-  backgroundColor: '#0b0d12',
-  scale: { mode: Phaser.Scale.RESIZE, width: '100%', height: '100%' },
-  physics: { default: 'matter', matter: { gravity: { x: 0, y: 0 } } },
-  scene: InputScene,
+// ---- hearing ---------------------------------------------------------------
+
+function renderPodiums() {
+  const speakingId = state.hearing?.playerId;
+  $('podiums').innerHTML = state.players.map((p) => `
+    <div class="podium ${p.id === speakingId ? 'speaking' : ''}" style="--c:${p.color}">
+      <div class="head"></div>
+      <div class="stand">${esc(charName(p))}</div>
+    </div>`).join('');
+}
+
+function onHearingLine({ index, playerId, character, text, audioUrl }) {
+  const p = playerById(playerId);
+  $('sub-name').textContent = `${character?.name || charName(p)}${p ? ` (${p.name})` : ''}`;
+  $('sub-text').textContent = text;
+  $('subtitle').style.setProperty('--c', p?.color || '');
+  $('subtitle').classList.remove('hidden');
+  cameraFlashes(2);
+  play(audioUrl, () => socket.emit('hearing:done', { index }));
+}
+
+// ---- vote and results ------------------------------------------------------
+
+function renderVoteAnswers() {
+  $('vote-answers').innerHTML = state.answers.map((a) => {
+    const p = playerById(a.playerId);
+    return `<div class="card" style="--c:${p?.color || '#999'}"><span class="who">${esc(charName(p))}</span>${esc(a.text)}</div>`;
+  }).join('');
+}
+
+function renderResults() {
+  const { votes = {}, winners = [] } = state.results || {};
+  const final = state.phase === 'final';
+  const names = winners.map((id) => charName(playerById(id)));
+  $('winner-line').textContent = final
+    ? `Final results`
+    : names.length ? `${names.join(' and ')} won the room!` : 'Nobody convinced the press.';
+  if (final) setAll('.round-tag', 'Game over');
+  $('again').classList.toggle('hidden', !final);
+
+  const ranked = [...state.players].sort((a, b) => b.score - a.score);
+  const top = ranked[0]?.score;
+  $('scoreboard').innerHTML = ranked.map((p, i) => {
+    const win = final ? p.score === top && top > 0 : winners.includes(p.id);
+    const v = votes[p.id] || 0;
+    return `<li class="${win ? 'winner' : ''}" style="--c:${p.color}; animation-delay:${i * 0.15}s">
+      <span class="rank">${i + 1}</span>
+      <span class="who">${esc(p.name)}<small>${esc(charName(p))}</small></span>
+      <span class="delta">${v ? `+${v} vote${v > 1 ? 's' : ''}` : ''}</span>
+      <span>${p.score}</span>
+    </li>`;
+  }).join('');
+  cameraFlashes(final ? 8 : 4);
+}
+
+// ---- host controls ---------------------------------------------------------
+
+function start() {
+  unlockSound();
+  if (state.phase === 'final') return socket.emit('game:reset');
+  if (state.phase !== 'lobby') return;
+  socket.emit('game:start', (res) => ($('start-error').textContent = res?.error || ''));
+}
+$('start').onclick = start;
+$('again').onclick = start;
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') start();
+  if (e.key === 'n' || e.key === 'N') socket.emit('phase:next');
+  if (e.key === 'r' || e.key === 'R') socket.emit('game:reset');
 });
