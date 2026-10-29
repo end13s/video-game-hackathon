@@ -112,7 +112,7 @@ function render() {
   const politician = playerById(state.politicianId);
   const atPodium = state.politicianId === me.id;
   setAll('.politician-name', charName(politician));
-  renderCards(atPodium);
+  setAll('.headline', state.headline || '');
 
   switch (state.phase) {
     case 'lobby':
@@ -121,17 +121,21 @@ function render() {
     case 'ask':
       if (atPodium) return show('podium');
       return renderAsk();
+    case 'pick':
+      if (atPodium) return look('You\'re at the podium', 'The press is picking your question…', 'Get your dodge ready.', me);
+      return renderPick(me);
     case 'question':
-      if (atPodium) return look('Incoming question', 'Look at the TV', 'Get your talking points ready.', me);
-      return look('Eyes on the TV', 'A question for the podium…', '', politician);
+      if (atPodium) return look('Incoming question', 'Look at the TV', 'Your answer box opens next.', me);
+      return look('Eyes on the TV', 'The question is being asked…', '', politician);
     case 'answer':
       if (atPodium) return renderAnswer();
-      return look('Eyes on the TV', `${charName(politician)} is preparing a dodge…`, '', politician);
+      return look('Eyes on the TV', `${charName(politician)} is writing a dodge…`, '', politician);
     case 'hearing':
       if (atPodium) return look('You have the floor', '🎤 Your answer is playing', 'Look at the TV.', me);
       return look('Eyes on the TV', `${charName(politician)} responds`, '', politician);
-    case 'vote':
-      return renderVote(me);
+    case 'rate':
+      if (atPodium) return look('The press is rating you', 'How did your dodge land?', '', me);
+      return renderRate();
     case 'results':
     case 'final':
       return renderResults(me);
@@ -174,16 +178,6 @@ $('look-options').onclick = (e) => {
 };
 $('randomise').onclick = () => sendLook(randomLook());
 
-// ---- talking points --------------------------------------------------------
-
-function renderCards(atPodium) {
-  const cards = state.talkingPoints || [];
-  const html = cards.map((c) => `<button type="button" class="card-btn ${c.used ? 'used' : ''}" data-text="${esc(c.text)}" ${c.used ? 'disabled' : ''}>${esc(c.text)}</button>`).join('');
-  for (const el of document.querySelectorAll('.cards')) el.innerHTML = html;
-  // Journalists see the hand too, so they can aim questions at it.
-  for (const el of document.querySelectorAll('.small-cards')) el.classList.toggle('hidden', atPodium || !cards.length);
-}
-
 // ---- ask (journalists) -----------------------------------------------------
 
 function renderAsk() {
@@ -217,18 +211,41 @@ $('edit-question').onclick = () => {
   $('question').focus();
 };
 
+// ---- pick (journalists) ---------------------------------------------------
+
+// Questions are anonymous while picking; your own is shown but can't be picked.
+function renderPick(me) {
+  $('pick-list').innerHTML = state.questions.map((q) => {
+    const own = q.id === me.id;
+    const picked = you.votes?.question === q.id ? 'picked' : '';
+    return `<button class="${picked}" data-id="${esc(q.id)}" ${own ? 'disabled' : ''}>${own ? '<span class="who">Your question</span>' : ''}${esc(q.text)}</button>`;
+  }).join('');
+  $('pick-done').classList.toggle('hidden', !you.votes?.question);
+  show('pick');
+}
+
+// You can change your vote until time is up.
+$('pick-list').onclick = (e) => {
+  const btn = e.target.closest('button');
+  if (!btn || btn.disabled || btn.dataset.id === you.votes?.question) return;
+  socket.emit('vote:question', { targetId: btn.dataset.id }, (res) => {
+    $('pick-error').textContent = res?.error || '';
+    if (!res?.error) navigator.vibrate?.(40);
+  });
+};
+
 // ---- answer (politician) ---------------------------------------------------
 
-let answeringIndex = null;
+let answeringRound = null;
 
 function renderAnswer() {
-  const g = state.grill;
-  const asker = playerById(g?.journalistId);
-  setAll('.asker', asker ? `${asker.name}, ${asker.outlet}` : 'A journalist');
-  setAll('.question-text', g?.question || '');
-  // A new question clears the box.
-  if (answeringIndex !== g?.index) {
-    answeringIndex = g?.index;
+  const c = state.chosen;
+  const asker = playerById(c?.journalistId);
+  setAll('.asker', asker ? `${asker.name}, ${asker.outlet}` : 'The press');
+  setAll('.question-text', c?.question || '');
+  // A new round clears the box.
+  if (answeringRound !== state.round) {
+    answeringRound = state.round;
     $('answer').value = '';
     $('answer').oninput();
     $('answer-error').textContent = '';
@@ -238,31 +255,14 @@ function renderAnswer() {
 
 $('answer').oninput = () => ($('answer-count').textContent = `${$('answer').value.length} / 200`);
 submitOnEnter($('answer'), $('answer-form'));
-
-// Tapping a talking point drops it into the answer where the cursor is.
-$('answer-cards').onclick = (e) => {
-  const btn = e.target.closest('button');
-  if (!btn || btn.disabled) return;
-  const box = $('answer');
-  const text = btn.dataset.text;
-  const start = box.selectionStart ?? box.value.length;
-  const end = box.selectionEnd ?? box.value.length;
-  const before = box.value.slice(0, start);
-  const insert = `${before && !before.endsWith(' ') ? ' ' : ''}${text} `;
-  box.value = (before + insert + box.value.slice(end)).slice(0, 200);
-  box.focus();
-  const pos = Math.min(200, before.length + insert.length);
-  box.setSelectionRange(pos, pos);
-  box.oninput();
-};
-
 $('answer-form').onsubmit = (e) => {
   e.preventDefault();
   const text = $('answer').value.trim();
   if (!text) return $('answer').focus();
+  $('answer').blur();
   socket.emit('answer:submit', { text }, (res) => {
     $('answer-error').textContent = res?.error || '';
-    if (!res?.error) $('answer').blur();
+    if (!res?.error) navigator.vibrate?.(40);
   });
 };
 
@@ -275,42 +275,22 @@ function submitOnEnter(box, form) {
   };
 }
 
-// ---- vote ------------------------------------------------------------------
+// ---- rate (journalists) ----------------------------------------------------
 
-function renderVote(me) {
-  const others = state.transcript.filter((t) => t.journalistId !== me.id);
-  const atPodium = state.politicianId === me.id;
-  $('vote-question-block').classList.toggle('hidden', !others.length);
-  $('vote-dodge-block').classList.toggle('hidden', atPodium);
-
-  $('vote-list').innerHTML = others.map((t) => {
-    const p = playerById(t.journalistId);
-    const picked = you.votes?.question === t.journalistId ? 'picked' : '';
-    return `<button class="${picked}" data-id="${esc(t.journalistId)}" style="--vc:${p?.color || ''}"><span class="who">${esc(p?.name)} · ${esc(p?.outlet)}</span>${esc(t.question)}</button>`;
-  }).join('');
-
-  const rating = you.votes?.dodge || 0;
+function renderRate() {
+  $('rate-answer').textContent = state.chosen?.answer || '';
+  const rating = you.votes?.stars || 0;
   $('stars').innerHTML = [1, 2, 3, 4, 5].map((n) => `<button type="button" data-stars="${n}" class="${n <= rating ? 'on' : ''}">★</button>`).join('');
-
-  const done = (!others.length || you.votes?.question) && (atPodium || you.votes?.dodge);
-  $('vote-done').classList.toggle('hidden', !done);
-  show('vote');
+  $('rate-done').classList.toggle('hidden', !rating);
+  show('rate');
 }
 
-// You can change your votes until time is up.
-$('vote-list').onclick = (e) => {
-  const btn = e.target.closest('button');
-  if (!btn || btn.dataset.id === you.votes?.question) return;
-  socket.emit('vote:question', { targetId: btn.dataset.id }, (res) => {
-    $('vote-error').textContent = res?.error || '';
-    if (!res?.error) navigator.vibrate?.(40);
-  });
-};
+// You can change your rating until time is up.
 $('stars').onclick = (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
-  socket.emit('vote:dodge', { stars: Number(btn.dataset.stars) }, (res) => {
-    $('vote-error').textContent = res?.error || '';
+  socket.emit('answer:rate', { stars: Number(btn.dataset.stars) }, (res) => {
+    $('rate-error').textContent = res?.error || '';
     if (!res?.error) navigator.vibrate?.(40);
   });
 };
@@ -319,7 +299,7 @@ $('stars').onclick = (e) => {
 
 function renderResults(me) {
   const final = state.phase === 'final';
-  const { questionVotes = {}, bestQuestion = [], dodge = {}, points = {} } = state.results || {};
+  const { bestQuestion = null, rating = {}, points = {} } = state.results || {};
   const ranked = [...state.players].sort((a, b) => b.score - a.score);
   const rank = ranked.findIndex((p) => p.id === me.id) + 1;
   const wasPolitician = state.politicianId === me.id;
@@ -332,10 +312,10 @@ function renderResults(me) {
   } else {
     $('result-kicker').textContent = `Round ${state.round} results`;
     if (wasPolitician) {
-      $('result-rank').textContent = dodge.count ? `Your dodge: ${'★'.repeat(Math.round(dodge.average))}${'☆'.repeat(5 - Math.round(dodge.average))}` : 'Nobody rated you';
+      const n = Math.round(rating.average || 0);
+      $('result-rank').textContent = rating.count ? `Your answer: ${'★'.repeat(n)}${'☆'.repeat(5 - n)} (${rating.average})` : 'Nobody rated you';
     } else {
-      const v = questionVotes[me.id] || 0;
-      $('result-rank').textContent = bestQuestion.includes(me.id) ? 'Toughest question!' : `${v} vote${v === 1 ? '' : 's'} for your question`;
+      $('result-rank').textContent = bestQuestion === me.id ? 'Your question won!' : 'Your question wasn\'t picked';
     }
     $('result-score').textContent = `+${points[me.id] || 0} this round · ${me.score} points · #${rank}`;
   }

@@ -47,9 +47,9 @@
     </section>
 
     <section data-screen="ask">
-      <p class="kicker">You're a journalist</p>
-      <p class="prompt">Ask <strong class="politician-name"></strong> a question they'll hate.</p>
-      <div class="cards small-cards"></div>
+      <p class="kicker">You're a journalist · Breaking news</p>
+      <p class="headline"></p>
+      <p class="prompt">Ask <strong class="politician-name"></strong> about it.</p>
       <form id="ask-form">
         <textarea id="question" maxlength="160" placeholder="Senator, is it true that…" enterkeyhint="send"></textarea>
         <div class="row">
@@ -67,18 +67,25 @@
     </section>
 
     <section data-screen="podium">
-      <p class="kicker">You're at the podium</p>
-      <p class="prompt">The press is writing questions. Every answer must use one of your talking points:</p>
-      <div class="cards"></div>
-      <p class="muted">Each point can only be used once.</p>
+      <p class="kicker">You're at the podium · Breaking news</p>
+      <p class="headline"></p>
+      <p class="prompt">The press is writing questions about it, and will pick the best one for you to answer.</p>
+      <p class="muted">Get your dodge ready.</p>
+    </section>
+
+    <section data-screen="pick">
+      <p class="kicker">Pick the best question</p>
+      <p class="muted">The winner gets asked. You can't pick your own.</p>
+      <div id="pick-list" class="vote-list"></div>
+      <p id="pick-error" class="error"></p>
+      <p id="pick-done" class="muted center hidden">Vote in! You can still change it.</p>
     </section>
 
     <section data-screen="answer">
       <p class="kicker"><span class="asker"></span> asks</p>
       <p class="question-text"></p>
-      <div id="answer-cards" class="cards tap-cards"></div>
       <form id="answer-form">
-        <textarea id="answer" maxlength="200" placeholder="Tap a talking point, then dodge…" enterkeyhint="send"></textarea>
+        <textarea id="answer" maxlength="200" placeholder="Your answer… dodge it!" enterkeyhint="send"></textarea>
         <div class="row">
           <span id="answer-count" class="muted">0 / 200</span>
           <button class="big" type="submit">Answer</button>
@@ -87,17 +94,12 @@
       </form>
     </section>
 
-    <section data-screen="vote">
-      <div id="vote-question-block">
-        <p class="kicker">Toughest question</p>
-        <div id="vote-list" class="vote-list"></div>
-      </div>
-      <div id="vote-dodge-block">
-        <p class="kicker">Rate the dodge</p>
-        <div id="stars" class="stars"></div>
-      </div>
-      <p id="vote-error" class="error"></p>
-      <p id="vote-done" class="muted center hidden">Thanks! Waiting for the others…</p>
+    <section data-screen="rate">
+      <p class="kicker">Rate the answer</p>
+      <p class="quote" id="rate-answer"></p>
+      <div id="stars" class="stars"></div>
+      <p id="rate-error" class="error"></p>
+      <p id="rate-done" class="muted center hidden">Rating in! You can still change it.</p>
     </section>
 
     <section data-screen="results">

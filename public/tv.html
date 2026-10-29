@@ -8,6 +8,62 @@
   <link rel="stylesheet" href="/tv.css">
 </head>
 <body data-phase="lobby">
+  <!-- The press room is always there; the screens below sit on top of it. -->
+  <div id="room">
+    <div class="wall">
+      <div class="valance"></div>
+      <svg class="seal" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="sealFace" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="#2c4ea3"/><stop offset="1" stop-color="#0d1a40"/></radialGradient>
+          <linearGradient id="sealGold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff1a8"/><stop offset=".5" stop-color="#d4a52a"/><stop offset="1" stop-color="#8a6510"/></linearGradient>
+          <path id="sealText" d="M100 100 m-70 0 a70 70 0 1 1 140 0 a70 70 0 1 1 -140 0"/>
+        </defs>
+        <circle cx="100" cy="100" r="96" fill="url(#sealGold)"/>
+        <circle cx="100" cy="100" r="88" fill="url(#sealFace)"/>
+        <circle cx="100" cy="100" r="58" fill="none" stroke="url(#sealGold)" stroke-width="3"/>
+        <text font-family="Georgia, serif" font-size="15" font-weight="700" letter-spacing="4" fill="#f4d77a"><textPath href="#sealText" startOffset="2%">OFFICE OF THE PRESS · SECRETARY ·</textPath></text>
+        <path d="M100 58 L111 88 L143 88 L117 106 L127 137 L100 118 L73 137 L83 106 L57 88 L89 88Z" fill="url(#sealGold)"/>
+      </svg>
+      <div class="flag left"><div class="pole"></div><svg viewBox="0 0 60 120" xmlns="http://www.w3.org/2000/svg"><use href="#flagCloth"/></svg></div>
+      <div class="flag right"><div class="pole"></div><svg viewBox="0 0 60 120" xmlns="http://www.w3.org/2000/svg"><use href="#flagCloth"/></svg></div>
+    </div>
+    <div class="floor"></div>
+    <div class="tv-camera left"></div>
+    <div class="tv-camera right"></div>
+    <div class="riser"></div>
+    <div class="spot"></div>
+    <div id="podium">
+      <div id="politician" class="person"></div>
+      <svg class="mics" viewBox="0 0 120 70" xmlns="http://www.w3.org/2000/svg">
+        <g stroke="#1b1b1f" stroke-width="2.4" stroke-linecap="round">
+          <path d="M20 70 L46 14"/><path d="M42 70 L54 10"/><path d="M60 70 L60 8"/><path d="M78 70 L66 10"/><path d="M100 70 L74 14"/>
+        </g>
+        <g>
+          <ellipse cx="46" cy="12" rx="5" ry="6" fill="#2b2b30"/><ellipse cx="54" cy="8" rx="5" ry="6" fill="#2b2b30"/><ellipse cx="60" cy="6" rx="5" ry="6" fill="#2b2b30"/><ellipse cx="66" cy="8" rx="5" ry="6" fill="#2b2b30"/><ellipse cx="74" cy="12" rx="5" ry="6" fill="#2b2b30"/>
+          <rect x="29" y="40" width="13" height="10" rx="1.5" fill="#d7263d"/><rect x="45" y="34" width="13" height="10" rx="1.5" fill="#f4c542"/><rect x="54" y="30" width="12" height="10" rx="1.5" fill="#3b82f6"/><rect x="63" y="34" width="13" height="10" rx="1.5" fill="#22c55e"/><rect x="79" y="40" width="13" height="10" rx="1.5" fill="#f5f6fa"/>
+          <g font-family="system-ui, sans-serif" font-size="6" font-weight="900" text-anchor="middle"><text x="35.5" y="47.5" fill="#fff">9</text><text x="51.5" y="41.5" fill="#0b1530">DL</text><text x="60" y="37.5" fill="#fff">MP</text><text x="69.5" y="41.5" fill="#fff">RF</text><text x="85.5" y="47.5" fill="#d7263d">BN</text></g>
+        </g>
+      </svg>
+      <div class="lectern"><span class="lectern-seal">★</span><span class="lectern-plate">Press Conference</span></div>
+    </div>
+    <div id="walkers"></div>
+    <div id="rows"></div>
+    <div id="press"></div>
+    <svg width="0" height="0" style="position:absolute">
+      <defs>
+        <linearGradient id="chairShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".4"/></linearGradient>
+        <linearGradient id="flagShade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".35"/><stop offset=".3" stop-color="#fff" stop-opacity=".15"/><stop offset=".6" stop-color="#000" stop-opacity=".25"/><stop offset="1" stop-color="#fff" stop-opacity=".1"/></linearGradient>
+        <g id="flagCloth">
+          <path d="M4 4 Q30 0 56 6 L54 118 Q30 112 4 116Z" fill="#1d3a8a"/>
+          <path d="M4 40 Q30 36 56 42 L55.5 62 Q30 56 4 60Z" fill="#d7263d"/>
+          <path d="M4 60 Q30 56 55.5 62 L55 70 Q30 64 4 68Z" fill="#f5f6fa"/>
+          <path d="M30 14 l3.5 9 h9.5 l-7.7 5.6 3 9 -7.8 -5.6 -7.8 5.6 3 -9 -7.7 -5.6 h9.5Z" fill="#f4c542"/>
+          <path d="M4 4 Q30 0 56 6 L54 118 Q30 112 4 116Z" fill="url(#flagShade)"/>
+        </g>
+      </defs>
+    </svg>
+  </div>
+
   <div id="flash"></div>
   <button id="sound">Click to enable sound</button>
 
@@ -19,15 +75,15 @@
 
   <main>
     <section data-screen="lobby">
-      <div class="lobby-join">
+      <div class="panel lobby-join">
         <div id="qr"></div>
         <p class="join-label">Scan to join the press conference</p>
         <p id="join-url" class="mono"></p>
         <p id="url-warning" class="warn hidden">This is a localhost address, phones can't reach it. Open the TV through the tunnel URL, or set PUBLIC_URL in .env.</p>
       </div>
-      <div class="lobby-side">
+      <div class="panel lobby-side">
         <h1 class="title">Press<br>Conference</h1>
-        <p class="sub">One of you takes the podium. Everyone else grills them. Dodge with your talking points.</p>
+        <p class="sub">One of you takes the podium. Everyone else grills them about the headline, picks the best question and rates the dodge.</p>
         <ul id="lobby-players" class="player-list"></ul>
         <div class="lobby-buttons">
           <button id="start" class="big-btn" disabled>Start (Enter)</button>
@@ -38,48 +94,51 @@
     </section>
 
     <section data-screen="ask">
-      <div class="ask-main">
-        <div class="podium-wrap"><div class="podium-figure"></div></div>
-        <div class="ask-side">
-          <p class="kicker">Now at the podium</p>
-          <h2 class="politician-title"></h2>
-          <p class="sub">Every answer must use one of these talking points:</p>
-          <div class="cards"></div>
-        </div>
+      <div class="news-bar">
+        <p class="breaking">Breaking news</p>
+        <h2 class="headline"></h2>
+        <p class="sub">At the podium: <strong class="politician-title"></strong> · Journalists, write your questions! <span class="counter-inline"><span id="asked">0</span> / <span id="ask-total">0</span></span></p>
       </div>
-      <p class="status">Journalists, write your questions! <span class="counter-inline"><span id="asked">0</span> / <span id="ask-total">0</span></span></p>
     </section>
 
     <section data-screen="stage">
       <div class="card question-card">
-        <p class="from"><span id="q-count"></span> <strong id="asker"></strong> asks</p>
+        <p class="from"><strong id="asker"></strong> asks</p>
         <p class="question-text" id="question-text"></p>
       </div>
-      <div class="stage-row">
-        <div class="podium-wrap"><div class="podium-figure"></div></div>
-        <div class="stage-side">
-          <p id="stage-status" class="status"></p>
-          <div class="cards"></div>
-        </div>
+      <div class="side-box">
+        <p class="breaking small">Breaking news</p>
+        <p class="headline small"></p>
+        <p id="stage-status" class="status"></p>
       </div>
       <div id="subtitle" class="lower-third hidden">
         <p id="sub-name" class="lt-name"></p>
         <p id="sub-text" class="lt-text"></p>
       </div>
+      <div id="rate-bar" class="rate-bar">
+        <span class="stars-big">★★★★★</span>
+        <span>Journalists, rate the answer on your phone!</span>
+        <span class="counter-inline"><span id="rated">0</span> / <span class="journalist-total">0</span></span>
+      </div>
     </section>
 
-    <section data-screen="vote">
-      <h2 class="heading">Vote on your phone</h2>
-      <p class="sub center">Pick the toughest question. Journalists, rate the dodge.</p>
-      <div id="transcript" class="transcript"></div>
-      <p class="counter"><span id="voted">0</span> / <span class="total">0</span> votes in</p>
+    <section data-screen="pick">
+      <div class="panel wide">
+        <p class="breaking">Breaking news</p>
+        <p class="headline pick-headline"></p>
+        <h2 class="heading">The press picks the question</h2>
+        <div id="pick-list" class="pick-list"></div>
+        <p class="counter center"><span id="picked">0</span> / <span class="journalist-total">0</span> journalists have voted</p>
+      </div>
     </section>
 
     <section data-screen="results">
-      <h2 class="heading" id="results-heading"></h2>
-      <div id="highlights" class="highlights"></div>
-      <ol id="scoreboard" class="scoreboard"></ol>
-      <button id="again" class="big-btn hidden">Play again (Enter)</button>
+      <div class="panel wide results-panel">
+        <h2 class="heading" id="results-heading"></h2>
+        <div id="highlights" class="highlights"></div>
+        <ol id="scoreboard" class="scoreboard"></ol>
+        <button id="again" class="big-btn hidden">Play again (Enter)</button>
+      </div>
     </section>
   </main>
 

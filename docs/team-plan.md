@@ -1,6 +1,6 @@
 # Team plan for tonight
 
-Concept: **Press Conference** (one player is the politician at the podium, the others are journalists who type questions; the politician dodges using a hand of talking points, the room votes on the toughest question and rates the dodge, and the podium rotates every round). Rules and message list: [press-conference.md](press-conference.md).
+Concept: **Press Conference** (one player is the politician at the podium; the journalists write questions about a breaking-news headline, vote for the best one, then rate the politician's written answer 1–5 stars; everyone takes the podium once). Rules and message list: [press-conference.md](press-conference.md).
 
 | | Role | Owns |
 |---|---|---|
