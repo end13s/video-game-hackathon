@@ -400,12 +400,14 @@ class Room {
     const p = this.players.get(this.chosen.journalistId);
     const question = this.chosen.question;
     const round = this.round;
+    // Backup questions may have a pre-made MP3 (npm run audio:questions).
+    const premade = content.questions.find((q) => q.text === question && q.audio);
     this.setPhase('question', { timerMs: speakingMs(question, MAX_QUESTION_MS), onTimeout: () => this.startAnswer() });
     this.emit('question:ask', {
       round,
       text: question,
       journalist: { playerId: p?.id || null, name: p?.name || 'The press', outlet: p ? pressOf(p).outlet : '' },
-      audioUrl: speak(question, (p && pressOf(p).voiceId) || DEFAULT_VOICE_ID),
+      audioUrl: premade ? `/audio/${premade.audio}` : speak(question, (p && pressOf(p).voiceId) || DEFAULT_VOICE_ID),
     });
   }
 
