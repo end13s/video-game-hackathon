@@ -52,6 +52,7 @@ The voice test only appears when `ELEVENLABS_API_KEY` and `ELEVENLABS_TEST_VOICE
 ## Docs
 
 - [docs/PLAN.md](docs/PLAN.md): timeline, rules, decision rule, roles, build schedule, demo
+- [docs/team-plan.md](docs/team-plan.md): tonight's goals per person, checkpoints, what to cut
 - [docs/press-conference.md](docs/press-conference.md): concept for a talking theme
 - [docs/one-vessel-one-traitor.md](docs/one-vessel-one-traitor.md): concept for any other theme
 - [docs/night-of-checklist.md](docs/night-of-checklist.md): arrival, audio to make, first 15 minutes after the reveal
