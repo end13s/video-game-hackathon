@@ -1,4 +1,5 @@
-// Press Conference game server. Phones open /, the TV opens /tv.
+// Press Conference game server. The TV opens /tv and gets a room code;
+// phones open /?room=CODE (the TV shows it as a QR code).
 // Message list: docs/press-conference.md
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
@@ -25,12 +26,16 @@ const MAX_QUESTION_MS = 20000;
 const MAX_LINE_MS = 25000;
 const LOBBY_DROP_MS = 30000; // forget players who leave the lobby and don't come back
 const GRACE_MS = 15000; // a refresh or network blip doesn't count as leaving the round
+const EMPTY_ROOM_MS = 10 * 60 * 1000; // delete rooms nobody has been in for this long
+const MAX_ROOMS = 30;
 const POINTS_PER_VOTE = 100;
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 6;
 const MAX_NAME = 16;
 const MAX_ANSWER = 200;
 const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316'];
+const BOT_NAMES = content.botNames || ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'];
+const BOT_ANSWERS = content.botAnswers || content.stockAnswers;
 
 const app = express();
 const server = http.createServer(app);
@@ -66,7 +71,7 @@ function speak(text, voiceId) {
   return `/speech/${job.id}`;
 }
 
-// The tunnel URL is public, so cap what the open endpoint can spend.
+// The link is public, so cap what the open endpoint can spend.
 let speakCount = 0;
 setInterval(() => (speakCount = 0), 60 * 1000).unref();
 
@@ -76,29 +81,11 @@ app.post('/api/speak', (req, res) => {
   const voiceId = voiceIdFor(String(req.body?.voice || 'anchor'));
   if (!text) return res.status(400).json({ error: 'Missing text' });
   if (!voiceId) return res.status(400).json({ error: 'Unknown voice' });
-  if (++speakCount > 30) return res.status(429).json({ error: 'Too many speak requests, try again in a minute' });
+  if (++speakCount > 60) return res.status(429).json({ error: 'Too many speak requests, try again in a minute' });
   res.json({ url: speak(text, voiceId) });
 });
 
-// ---- game state ---------------------------------------------------------------
-
-// playerId -> { id, name, color, connected, score, characterId, dropTimer }
-const players = new Map();
-
-const game = {
-  phase: 'lobby',
-  round: 0,
-  endsAt: null, // only for phases with a visible countdown
-  timer: null,
-  onTimeout: null,
-  question: null, // { text, journalist, audio }
-  answers: new Map(), // playerId -> text, this round
-  votes: new Map(), // voterId -> targetId, this round
-  lines: [], // [{ playerId, text, audioUrl }] in hearing order
-  hearingIndex: -1,
-  results: null,
-  questionsLeft: [],
-};
+// ---- helpers ------------------------------------------------------------------
 
 const shuffle = (list) => {
   const a = [...list];
@@ -109,307 +96,504 @@ const shuffle = (list) => {
   return a;
 };
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
+const randomMs = (min, max) => min + Math.random() * (max - min);
+
+// Models that act out [tags] instead of reading them aloud.
+const TAG_MODELS = ['eleven_v4', 'eleven_v4_turbo', 'eleven_v3', 'eleven_v3_conversational'];
+const ANSWER_TAGS = content.answerTags || [];
+
+const stripTags = (text) => text.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+
+// Gives an answer a random delivery: a tag up front, sometimes another before a later sentence.
+// Answers that already have tags (typed by the player) are left as they are.
+function addDelivery(text) {
+  if (!TAG_MODELS.includes(TTS_MODEL)) return stripTags(text) || text;
+  if (/\[[^\]]+\]/.test(text) || !ANSWER_TAGS.length) return text;
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const first = pick(ANSWER_TAGS);
+  sentences[0] = `${first} ${sentences[0]}`;
+  if (sentences.length > 1 && Math.random() < (content.secondTagChance ?? 0.5)) {
+    const i = 1 + Math.floor(Math.random() * (sentences.length - 1));
+    const second = pick(ANSWER_TAGS.filter((t) => t !== first));
+    sentences[i] = `${second} ${sentences[i]}`;
+  }
+  return sentences.join(' ');
+}
 
 // Rough time to read a line aloud, used when the TV doesn't tell us it finished.
 const speakingMs = (text, max) => Math.min(max, 3000 + text.length * 80);
 
-function characterOf(player) {
-  const c = content.politicians.find((p) => p.id === player.characterId);
+const cleanName = (name) => String(name || '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME) || 'Player';
+
+function characterInfo(characterId) {
+  const c = content.politicians.find((p) => p.id === characterId);
   return c ? { id: c.id, name: c.name, title: c.title } : null;
 }
 
-function publicPlayer(p) {
-  return {
-    id: p.id,
-    name: p.name,
-    color: p.color,
-    connected: p.connected,
-    score: p.score,
-    character: characterOf(p),
-    answered: game.answers.has(p.id),
-    voted: game.votes.has(p.id),
-  };
+const journalistInfo = (j) => ({ id: j.id, name: j.name, outlet: j.outlet });
+
+// ---- rooms --------------------------------------------------------------------
+
+const rooms = new Map(); // code -> Room
+
+// No I or O, so codes can't be misread as 1 or 0.
+function newRoomCode() {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let code;
+  do {
+    code = Array.from({ length: 4 }, () => letters[Math.floor(Math.random() * letters.length)]).join('');
+  } while (rooms.has(code));
+  return code;
 }
 
-function journalistInfo(j) {
-  return { id: j.id, name: j.name, outlet: j.outlet };
-}
-
-function publicState() {
-  const showAnswers = ['vote', 'results', 'final'].includes(game.phase);
-  const hearingLine = game.phase === 'hearing' ? game.lines[game.hearingIndex] : null;
-  return {
-    phase: game.phase,
-    remainingMs: game.endsAt ? Math.max(0, game.endsAt - Date.now()) : null,
-    round: game.round,
-    totalRounds: ROUNDS,
-    players: [...players.values()].map(publicPlayer),
-    question: game.question ? { text: game.question.text, journalist: journalistInfo(game.question.journalist) } : null,
-    hearing: hearingLine ? { index: game.hearingIndex, total: game.lines.length, playerId: hearingLine.playerId } : null,
-    answers: showAnswers ? game.lines.map(({ playerId, text }) => ({ playerId, text })) : [],
-    results: game.results,
-  };
-}
-
-function broadcast() {
-  io.emit('game:state', publicState());
-}
-
-function youPayload(playerId) {
-  const p = players.get(playerId);
-  return {
-    player: p ? publicPlayer(p) : null,
-    answer: game.answers.get(playerId) || null,
-    vote: game.votes.get(playerId) || null,
-  };
-}
-
-function sendYou(playerId) {
-  io.to(`player:${playerId}`).emit('you', youPayload(playerId));
-}
-
-// timerMs: when the phase ends by itself. visible: whether screens show a countdown for it.
-function setPhase(phase, { timerMs = null, visible = false, onTimeout = null } = {}) {
-  clearTimeout(game.timer);
-  game.phase = phase;
-  game.onTimeout = onTimeout;
-  game.timer = timerMs ? setTimeout(() => onTimeout(), timerMs) : null;
-  game.endsAt = timerMs && visible ? Date.now() + timerMs : null;
-  console.log(`[round ${game.round}] ${phase}${timerMs ? ` (${Math.round(timerMs / 1000)}s)` : ''}`);
-  broadcast();
-}
-
-const connectedPlayers = () => [...players.values()].filter((p) => p.connected);
-// Players we still wait for: connected, or dropped only a moment ago.
-const activePlayers = () => [...players.values()].filter((p) => p.connected || Date.now() - p.disconnectedAt < GRACE_MS);
-
-// Ends answering or voting early once everyone still playing is done.
-function checkAllIn() {
-  if (game.phase === 'answer' && activePlayers().every((p) => game.answers.has(p.id))) closeAnswers();
-  else if (game.phase === 'vote' && activePlayers().every((p) => game.votes.has(p.id))) finishVote();
-}
-
-// ---- phases -------------------------------------------------------------------
-
-function startGame() {
-  for (const p of players.values()) p.score = 0;
-  game.round = 0;
-  nextRound();
-}
-
-function nextRound() {
-  game.round++;
-  game.answers.clear();
-  game.votes.clear();
-  game.lines = [];
-  game.hearingIndex = -1;
-  game.results = null;
-
-  if (!game.questionsLeft.length) game.questionsLeft = shuffle(content.questions);
-  const q = game.questionsLeft.pop();
-  const journalist = content.journalists.find((j) => j.id === q.journalist) || pick(content.journalists);
-  game.question = { text: q.text, journalist };
-
-  const audioUrl = q.audio ? `/audio/${q.audio}` : speak(q.text, journalist.voiceId || DEFAULT_VOICE_ID);
-  const round = game.round;
-  setPhase('question', { timerMs: speakingMs(q.text, MAX_QUESTION_MS), onTimeout: startAnswer });
-  for (const id of players.keys()) sendYou(id);
-  io.emit('question:ask', { round, text: q.text, journalist: journalistInfo(journalist), audioUrl });
-}
-
-function startAnswer() {
-  setPhase('answer', { timerMs: ANSWER_MS, visible: true, onTimeout: closeAnswers });
-}
-
-function closeAnswers() {
-  // Everyone still here gets a line, even if they didn't answer.
-  const speakers = [...players.values()].filter((p) => activePlayers().includes(p) || game.answers.has(p.id));
-  game.lines = shuffle(speakers).map((p) => {
-    const text = game.answers.get(p.id) || pick(content.stockAnswers);
-    const character = content.politicians.find((c) => c.id === p.characterId);
-    // Start every line now, so the audio is ready by the time its turn comes.
-    return { playerId: p.id, text, audioUrl: speak(text, (character && character.voiceId) || DEFAULT_VOICE_ID) };
-  });
-  playLine(0);
-}
-
-function playLine(index) {
-  if (index >= game.lines.length) return startVote();
-  game.hearingIndex = index;
-  const line = game.lines[index];
-  setPhase('hearing', { timerMs: speakingMs(line.text, MAX_LINE_MS), onTimeout: () => playLine(index + 1) });
-  const p = players.get(line.playerId);
-  io.emit('hearing:line', {
-    index,
-    total: game.lines.length,
-    playerId: line.playerId,
-    character: p ? characterOf(p) : null,
-    text: line.text,
-    audioUrl: line.audioUrl,
-  });
-}
-
-function startVote() {
-  if (game.lines.length < 2) return finishVote(); // nothing to choose between
-  setPhase('vote', { timerMs: VOTE_MS, visible: true, onTimeout: finishVote });
-}
-
-function finishVote() {
-  const votes = {};
-  for (const target of game.votes.values()) votes[target] = (votes[target] || 0) + 1;
-  const points = {};
-  for (const [id, n] of Object.entries(votes)) {
-    points[id] = n * POINTS_PER_VOTE;
-    const p = players.get(id);
-    if (p) p.score += points[id];
+class Room {
+  constructor(code) {
+    this.code = code;
+    // playerId -> { id, name, color, connected, disconnectedAt, score, characterId, bot, dropTimer }
+    this.players = new Map();
+    this.phase = 'lobby';
+    this.round = 0;
+    this.endsAt = null; // only for phases with a visible countdown
+    this.timer = null;
+    this.onTimeout = null;
+    this.question = null; // { text, journalist }
+    this.answers = new Map(); // playerId -> text, this round
+    this.votes = new Map(); // voterId -> targetId, this round
+    this.lines = []; // [{ playerId, text, audioUrl }] in hearing order
+    this.hearingIndex = -1;
+    this.results = null;
+    this.questionsLeft = [];
+    this.lastSeen = Date.now();
   }
-  const top = Math.max(0, ...Object.values(votes));
-  const winners = top > 0 ? Object.keys(votes).filter((id) => votes[id] === top) : [];
-  game.results = { votes, points, winners };
 
-  if (game.round >= ROUNDS) setPhase('final');
-  else setPhase('results', { timerMs: RESULTS_MS, visible: true, onTimeout: nextRound });
+  emit(event, data) {
+    io.to(this.code).emit(event, data);
+  }
+
+  // ---- state ----
+
+  publicPlayer(p) {
+    return {
+      id: p.id,
+      name: p.name,
+      color: p.color,
+      connected: p.connected,
+      bot: p.bot,
+      score: p.score,
+      character: characterInfo(p.characterId),
+      answered: this.answers.has(p.id),
+      voted: this.votes.has(p.id),
+    };
+  }
+
+  publicState() {
+    const showAnswers = ['vote', 'results', 'final'].includes(this.phase);
+    const hearingLine = this.phase === 'hearing' ? this.lines[this.hearingIndex] : null;
+    return {
+      roomCode: this.code,
+      phase: this.phase,
+      remainingMs: this.endsAt ? Math.max(0, this.endsAt - Date.now()) : null,
+      round: this.round,
+      totalRounds: ROUNDS,
+      players: [...this.players.values()].map((p) => this.publicPlayer(p)),
+      question: this.question ? { text: this.question.text, journalist: journalistInfo(this.question.journalist) } : null,
+      hearing: hearingLine ? { index: this.hearingIndex, total: this.lines.length, playerId: hearingLine.playerId } : null,
+      answers: showAnswers ? this.lines.map(({ playerId, text }) => ({ playerId, text })) : [],
+      results: this.results,
+    };
+  }
+
+  broadcast() {
+    this.emit('game:state', this.publicState());
+  }
+
+  youPayload(playerId) {
+    const p = this.players.get(playerId);
+    return {
+      player: p ? this.publicPlayer(p) : null,
+      answer: this.answers.get(playerId) || null,
+      vote: this.votes.get(playerId) || null,
+    };
+  }
+
+  sendYou(playerId) {
+    io.to(`${this.code}:${playerId}`).emit('you', this.youPayload(playerId));
+  }
+
+  // timerMs: when the phase ends by itself. visible: whether screens show a countdown for it.
+  setPhase(phase, { timerMs = null, visible = false, onTimeout = null } = {}) {
+    clearTimeout(this.timer);
+    this.phase = phase;
+    this.onTimeout = onTimeout;
+    this.timer = timerMs ? setTimeout(() => onTimeout(), timerMs) : null;
+    this.endsAt = timerMs && visible ? Date.now() + timerMs : null;
+    console.log(`[${this.code} round ${this.round}] ${phase}${timerMs ? ` (${Math.round(timerMs / 1000)}s)` : ''}`);
+    this.broadcast();
+    this.runBots();
+  }
+
+  connectedPlayers() {
+    return [...this.players.values()].filter((p) => p.connected);
+  }
+
+  // Players we still wait for: connected, or dropped only a moment ago.
+  activePlayers() {
+    return [...this.players.values()].filter((p) => p.connected || Date.now() - p.disconnectedAt < GRACE_MS);
+  }
+
+  // Ends answering or voting early once everyone still playing is done.
+  checkAllIn() {
+    const active = this.activePlayers();
+    if (this.phase === 'answer' && active.every((p) => this.answers.has(p.id))) this.closeAnswers();
+    else if (this.phase === 'vote' && active.every((p) => this.votes.has(p.id))) this.finishVote();
+  }
+
+  // ---- phases ----
+
+  startGame() {
+    for (const p of this.players.values()) p.score = 0;
+    this.round = 0;
+    this.nextRound();
+  }
+
+  nextRound() {
+    this.round++;
+    this.answers.clear();
+    this.votes.clear();
+    this.lines = [];
+    this.hearingIndex = -1;
+    this.results = null;
+
+    if (!this.questionsLeft.length) this.questionsLeft = shuffle(content.questions);
+    const q = this.questionsLeft.pop();
+    const journalist = content.journalists.find((j) => j.id === q.journalist) || pick(content.journalists);
+    this.question = { text: q.text, journalist };
+
+    const audioUrl = q.audio ? `/audio/${q.audio}` : speak(q.text, journalist.voiceId || DEFAULT_VOICE_ID);
+    const round = this.round;
+    this.setPhase('question', { timerMs: speakingMs(q.text, MAX_QUESTION_MS), onTimeout: () => this.startAnswer() });
+    for (const id of this.players.keys()) this.sendYou(id);
+    this.emit('question:ask', { round, text: q.text, journalist: journalistInfo(journalist), audioUrl });
+  }
+
+  startAnswer() {
+    this.setPhase('answer', { timerMs: ANSWER_MS, visible: true, onTimeout: () => this.closeAnswers() });
+  }
+
+  submitAnswer(playerId, text) {
+    if (this.phase !== 'answer') return { error: 'Answers are closed' };
+    text = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_ANSWER);
+    if (!text) return { error: 'Empty answer' };
+    this.answers.set(playerId, text);
+    this.sendYou(playerId);
+    this.broadcast();
+    this.checkAllIn();
+    return { ok: true };
+  }
+
+  closeAnswers() {
+    // Everyone still here gets a line, even if they didn't answer.
+    const active = this.activePlayers();
+    const speakers = [...this.players.values()].filter((p) => active.includes(p) || this.answers.has(p.id));
+    this.lines = shuffle(speakers).map((p) => {
+      const raw = this.answers.get(p.id) || pick(content.stockAnswers);
+      const speech = addDelivery(raw);
+      const character = content.politicians.find((c) => c.id === p.characterId);
+      // Start every line now, so the audio is ready by the time its turn comes.
+      // Screens get the text without tags; only the voice hears them.
+      return {
+        playerId: p.id,
+        text: stripTags(raw) || raw,
+        speech,
+        audioUrl: speak(speech, (character && character.voiceId) || DEFAULT_VOICE_ID),
+      };
+    });
+    this.playLine(0);
+  }
+
+  playLine(index) {
+    if (index >= this.lines.length) return this.startVote();
+    this.hearingIndex = index;
+    const line = this.lines[index];
+    this.setPhase('hearing', { timerMs: speakingMs(line.text, MAX_LINE_MS), onTimeout: () => this.playLine(index + 1) });
+    console.log(`[${this.code}]   says: ${line.speech}`);
+    const p = this.players.get(line.playerId);
+    this.emit('hearing:line', {
+      index,
+      total: this.lines.length,
+      playerId: line.playerId,
+      character: p ? characterInfo(p.characterId) : null,
+      text: line.text,
+      audioUrl: line.audioUrl,
+    });
+  }
+
+  startVote() {
+    if (this.lines.length < 2) return this.finishVote(); // nothing to choose between
+    this.setPhase('vote', { timerMs: VOTE_MS, visible: true, onTimeout: () => this.finishVote() });
+  }
+
+  castVote(voterId, targetId) {
+    if (this.phase !== 'vote') return { error: 'Voting is closed' };
+    if (targetId === voterId) return { error: "You can't vote for yourself" };
+    if (!this.lines.some((l) => l.playerId === targetId)) return { error: 'Unknown answer' };
+    this.votes.set(voterId, targetId);
+    this.sendYou(voterId);
+    this.broadcast();
+    this.checkAllIn();
+    return { ok: true };
+  }
+
+  finishVote() {
+    const votes = {};
+    for (const target of this.votes.values()) votes[target] = (votes[target] || 0) + 1;
+    const points = {};
+    for (const [id, n] of Object.entries(votes)) {
+      points[id] = n * POINTS_PER_VOTE;
+      const p = this.players.get(id);
+      if (p) p.score += points[id];
+    }
+    const top = Math.max(0, ...Object.values(votes));
+    const winners = top > 0 ? Object.keys(votes).filter((id) => votes[id] === top) : [];
+    this.results = { votes, points, winners };
+
+    if (this.round >= ROUNDS) this.setPhase('final');
+    else this.setPhase('results', { timerMs: RESULTS_MS, visible: true, onTimeout: () => this.nextRound() });
+  }
+
+  skipPhase() {
+    if (this.phase === 'lobby') return this.startGame();
+    if (this.onTimeout && this.timer) {
+      clearTimeout(this.timer);
+      this.onTimeout();
+    }
+  }
+
+  reset() {
+    clearTimeout(this.timer);
+    for (const p of this.players.values()) p.score = 0;
+    Object.assign(this, { round: 0, question: null, lines: [], hearingIndex: -1, results: null, endsAt: null, timer: null });
+    this.answers.clear();
+    this.votes.clear();
+    this.setPhase('lobby');
+    for (const id of this.players.keys()) this.sendYou(id);
+  }
+
+  // ---- players ----
+
+  pickColor() {
+    const used = new Set([...this.players.values()].map((p) => p.color));
+    return COLORS.find((c) => !used.has(c)) || COLORS[this.players.size % COLORS.length];
+  }
+
+  pickCharacter() {
+    const used = new Set([...this.players.values()].map((p) => p.characterId));
+    const free = content.politicians.find((c) => !used.has(c.id));
+    return (free || content.politicians[this.players.size % content.politicians.length]).id;
+  }
+
+  addPlayer(id, name, bot = false) {
+    const player = {
+      id,
+      name: cleanName(name),
+      color: this.pickColor(),
+      connected: true,
+      disconnectedAt: 0,
+      score: 0,
+      characterId: this.pickCharacter(),
+      bot,
+    };
+    this.players.set(id, player);
+    return player;
+  }
+
+  addBot() {
+    if (this.players.size >= MAX_PLAYERS) return { error: 'The room is full' };
+    const used = new Set([...this.players.values()].map((p) => p.name));
+    const name = BOT_NAMES.map((n) => `${n} (bot)`).find((n) => !used.has(n)) || 'Bot';
+    this.botCount = (this.botCount || 0) + 1;
+    const bot = this.addPlayer(`bot-${this.code}-${this.botCount}`, name, true);
+    this.broadcast();
+    return { ok: true, playerId: bot.id };
+  }
+
+  removeBot(playerId) {
+    const p = this.players.get(playerId);
+    if (!p || !p.bot) return { error: 'Not a bot' };
+    if (this.phase !== 'lobby') return { error: 'Remove bots in the lobby' };
+    this.players.delete(playerId);
+    this.broadcast();
+    return { ok: true };
+  }
+
+  // Bots answer and vote a few seconds into each phase, like slow humans.
+  runBots() {
+    const round = this.round;
+    for (const bot of [...this.players.values()].filter((p) => p.bot)) {
+      if (this.phase === 'answer') {
+        setTimeout(() => {
+          if (this.phase === 'answer' && this.round === round) this.submitAnswer(bot.id, pick(BOT_ANSWERS));
+        }, randomMs(4000, 15000));
+      }
+      if (this.phase === 'vote') {
+        setTimeout(() => {
+          if (this.phase !== 'vote' || this.round !== round) return;
+          const others = this.lines.filter((l) => l.playerId !== bot.id);
+          if (others.length) this.castVote(bot.id, pick(others).playerId);
+        }, randomMs(2000, 8000));
+      }
+    }
+  }
+
+  playerLeft(player) {
+    player.connected = false;
+    player.disconnectedAt = Date.now();
+    // If they don't come back, stop waiting for their answer or vote.
+    setTimeout(() => this.checkAllIn(), GRACE_MS + 100);
+    if (this.phase === 'lobby') {
+      player.dropTimer = setTimeout(() => {
+        if (!player.connected && this.phase === 'lobby') {
+          this.players.delete(player.id);
+          this.broadcast();
+        }
+      }, LOBBY_DROP_MS);
+    }
+    this.broadcast();
+  }
+
+  destroy() {
+    clearTimeout(this.timer);
+    for (const p of this.players.values()) clearTimeout(p.dropTimer);
+    rooms.delete(this.code);
+    console.log(`[${this.code}] room closed`);
+  }
 }
 
-function resetGame() {
-  clearTimeout(game.timer);
-  for (const p of players.values()) p.score = 0;
-  Object.assign(game, { round: 0, question: null, lines: [], hearingIndex: -1, results: null, endsAt: null, timer: null });
-  game.answers.clear();
-  game.votes.clear();
-  setPhase('lobby');
-  for (const id of players.keys()) sendYou(id);
-}
-
-// ---- players ------------------------------------------------------------------
-
-function pickColor() {
-  const used = new Set([...players.values()].map((p) => p.color));
-  return COLORS.find((c) => !used.has(c)) || COLORS[players.size % COLORS.length];
-}
-
-function pickCharacter() {
-  const used = new Set([...players.values()].map((p) => p.characterId));
-  const free = content.politicians.find((c) => !used.has(c.id));
-  return (free || content.politicians[players.size % content.politicians.length]).id;
-}
-
-const cleanName = (name) => String(name || '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME) || 'Player';
+// Rooms nobody is connected to anymore get cleaned up.
+setInterval(() => {
+  for (const room of rooms.values()) {
+    if (io.sockets.adapter.rooms.get(room.code)?.size) room.lastSeen = Date.now();
+    else if (Date.now() - room.lastSeen > EMPTY_ROOM_MS) room.destroy();
+  }
+}, 60 * 1000).unref();
 
 // ---- sockets ------------------------------------------------------------------
 
 io.on('connection', (socket) => {
-  const playerId = () => socket.data.playerId;
+  const room = () => rooms.get(socket.data.roomCode);
+  const reply = (ack) => (typeof ack === 'function' ? ack : () => {});
 
-  socket.on('player:join', ({ playerId: id, name } = {}, ack) => {
-    if (typeof ack !== 'function') return;
-    if (typeof id !== 'string' || !/^[\w-]{6,64}$/.test(id)) return ack({ error: 'Bad player id' });
+  // The TV creates a room, or gets its old one back after a refresh.
+  socket.on('tv:join', (data, ack) => {
+    if (typeof data === 'function') [data, ack] = [{}, data];
+    ack = reply(ack);
+    let r = rooms.get(String(data?.roomCode || '').toUpperCase());
+    if (!r) {
+      if (rooms.size >= MAX_ROOMS) return ack({ error: 'Too many games running, try again in a few minutes' });
+      r = new Room(newRoomCode());
+      rooms.set(r.code, r);
+      console.log(`[${r.code}] room opened`);
+    }
+    socket.data.roomCode = r.code;
+    socket.data.tv = true;
+    socket.join(r.code);
+    ack({ roomCode: r.code, state: r.publicState() });
+  });
 
-    let player = players.get(id);
+  socket.on('player:join', ({ roomCode, playerId, name } = {}, ack) => {
+    ack = reply(ack);
+    const r = rooms.get(String(roomCode || '').toUpperCase());
+    if (!r) return ack({ error: 'Room not found. Check the code on the TV' });
+    if (typeof playerId !== 'string' || !/^[\w-]{6,64}$/.test(playerId)) return ack({ error: 'Bad player id' });
+
+    let player = r.players.get(playerId);
     if (!player) {
-      if (players.size >= MAX_PLAYERS) return ack({ error: 'The room is full' });
-      player = { id, name: cleanName(name), color: pickColor(), connected: true, score: 0, characterId: pickCharacter() };
-      players.set(id, player);
+      if (r.players.size >= MAX_PLAYERS) return ack({ error: 'The room is full' });
+      player = r.addPlayer(playerId, name);
     } else if (name) {
       player.name = cleanName(name);
     }
     player.connected = true;
     clearTimeout(player.dropTimer);
-    socket.data.playerId = id;
-    socket.join(`player:${id}`);
-    ack({ you: youPayload(id) });
-    broadcast();
+    socket.data.roomCode = r.code;
+    socket.data.playerId = playerId;
+    socket.join(r.code);
+    socket.join(`${r.code}:${playerId}`);
+    ack({ roomCode: r.code, you: r.youPayload(playerId) });
+    r.broadcast();
   });
 
   socket.on('answer:submit', ({ text } = {}, ack) => {
-    const reply = typeof ack === 'function' ? ack : () => {};
-    const id = playerId();
-    if (!players.has(id)) return reply({ error: 'Join first' });
-    if (game.phase !== 'answer') return reply({ error: 'Answers are closed' });
-    text = String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_ANSWER);
-    if (!text) return reply({ error: 'Empty answer' });
-    game.answers.set(id, text);
-    reply({ ok: true });
-    sendYou(id);
-    broadcast();
-    checkAllIn();
+    ack = reply(ack);
+    const r = room();
+    if (!r || !r.players.has(socket.data.playerId)) return ack({ error: 'Join first' });
+    ack(r.submitAnswer(socket.data.playerId, text));
   });
 
   socket.on('vote:cast', ({ targetId } = {}, ack) => {
-    const reply = typeof ack === 'function' ? ack : () => {};
-    const id = playerId();
-    if (!players.has(id)) return reply({ error: 'Join first' });
-    if (game.phase !== 'vote') return reply({ error: 'Voting is closed' });
-    if (targetId === id) return reply({ error: "You can't vote for yourself" });
-    if (!game.lines.some((l) => l.playerId === targetId)) return reply({ error: 'Unknown answer' });
-    game.votes.set(id, targetId);
-    reply({ ok: true });
-    sendYou(id);
-    broadcast();
-    checkAllIn();
+    ack = reply(ack);
+    const r = room();
+    if (!r || !r.players.has(socket.data.playerId)) return ack({ error: 'Join first' });
+    ack(r.castVote(socket.data.playerId, targetId));
   });
 
-  socket.on('tv:join', (ack) => {
-    socket.join('tv');
-    if (typeof ack === 'function') ack({ state: publicState() });
-  });
+  // TV only from here on.
+  const tvRoom = () => (socket.data.tv ? room() : null);
 
   socket.on('game:start', (ack) => {
-    const reply = typeof ack === 'function' ? ack : () => {};
-    if (game.phase !== 'lobby') return reply({ error: 'Game already running' });
-    if (connectedPlayers().length < MIN_PLAYERS) return reply({ error: `Need at least ${MIN_PLAYERS} players` });
-    reply({ ok: true });
-    startGame();
+    ack = reply(ack);
+    const r = tvRoom();
+    if (!r) return ack({ error: 'Not a TV' });
+    if (r.phase !== 'lobby') return ack({ error: 'Game already running' });
+    if (r.connectedPlayers().length < MIN_PLAYERS) return ack({ error: `Need at least ${MIN_PLAYERS} players (add a bot?)` });
+    ack({ ok: true });
+    r.startGame();
+  });
+
+  socket.on('bot:add', (ack) => {
+    ack = reply(ack);
+    const r = tvRoom();
+    ack(r ? r.addBot() : { error: 'Not a TV' });
+  });
+
+  socket.on('bot:remove', ({ playerId } = {}, ack) => {
+    ack = reply(ack);
+    const r = tvRoom();
+    ack(r ? r.removeBot(playerId) : { error: 'Not a TV' });
   });
 
   socket.on('question:done', ({ round } = {}) => {
-    if (game.phase === 'question' && round === game.round) startAnswer();
+    const r = tvRoom();
+    if (r && r.phase === 'question' && round === r.round) r.startAnswer();
   });
 
   socket.on('hearing:done', ({ index } = {}) => {
-    if (game.phase === 'hearing' && index === game.hearingIndex) playLine(index + 1);
+    const r = tvRoom();
+    if (r && r.phase === 'hearing' && index === r.hearingIndex) r.playLine(index + 1);
   });
 
   // Dev: skip the rest of the current phase. In the lobby, start with any number of players.
-  socket.on('phase:next', () => {
-    if (game.phase === 'lobby') return startGame();
-    if (game.onTimeout && game.timer) {
-      clearTimeout(game.timer);
-      game.onTimeout();
-    }
-  });
-
-  socket.on('game:reset', resetGame);
+  socket.on('phase:next', () => tvRoom()?.skipPhase());
+  socket.on('game:reset', () => tvRoom()?.reset());
 
   socket.on('disconnect', () => {
-    const player = players.get(playerId());
+    const r = room();
+    const player = r && r.players.get(socket.data.playerId);
     if (!player) return;
     // Another tab may still be connected as the same player.
-    if (io.sockets.adapter.rooms.get(`player:${player.id}`)?.size) return;
-    player.connected = false;
-    player.disconnectedAt = Date.now();
-    // If they don't come back, stop waiting for their answer or vote.
-    setTimeout(checkAllIn, GRACE_MS + 100);
-    if (game.phase === 'lobby') {
-      player.dropTimer = setTimeout(() => {
-        if (!player.connected && game.phase === 'lobby') {
-          players.delete(player.id);
-          broadcast();
-        }
-      }, LOBBY_DROP_MS);
-    }
-    broadcast();
+    if (io.sockets.adapter.rooms.get(`${r.code}:${player.id}`)?.size) return;
+    r.playerLeft(player);
   });
 });
 
 // Countdowns drift on slow phones, so resend the remaining time now and then.
 setInterval(() => {
-  if (game.endsAt) broadcast();
+  for (const room of rooms.values()) if (room.endsAt) room.broadcast();
 }, 5000).unref();
 
 server.listen(PORT, () => {
   console.log(`Press Conference running on http://localhost:${PORT}`);
-  console.log(`  TV:     http://localhost:${PORT}/tv`);
+  console.log(`  TV:     http://localhost:${PORT}/tv   (each TV gets its own room)`);
   console.log(`  phones: scan the QR code on the TV page`);
   console.log(`  voice:  ${API_KEY ? `on (${TTS_MODEL})` : 'off (set ELEVENLABS_API_KEY in .env)'}`);
   console.log(`  rounds: ${ROUNDS}`);

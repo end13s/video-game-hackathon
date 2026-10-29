@@ -50,7 +50,7 @@ The message list is the contract between Eduard (server) and Finn (screens). It 
 ### Not building tonight
 
 - Accounts, logins, saved data, databases. Everything lives in server memory
-- More than one room or game at a time, room codes, a host menu
+- A host menu or lobby browser. Rooms exist (one per TV, 4-letter code) because the jury plays from a link
 - Settings screens (volume, language, timers). Hard-code good values
 - Chat between players
 - Custom avatars or photo uploads

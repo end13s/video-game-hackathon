@@ -2,92 +2,76 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#111318">
-  <title>Controller</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0b1530">
+  <title>Press Conference</title>
   <link rel="icon" href="data:,">
-  <style>
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0; height: 100%; overflow: hidden;
-      overscroll-behavior: none; touch-action: manipulation;
-      -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
-    }
-    body {
-      position: fixed; inset: 0; display: flex; flex-direction: column;
-      padding: calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 10px);
-      background: #111318; color: #eef0f4; font: 17px/1.35 system-ui, -apple-system, sans-serif;
-    }
-    button { font: inherit; border: 0; border-radius: 14px; color: #fff; }
-    input, textarea { font: inherit; font-size: 16px; border: 0; border-radius: 12px; padding: 12px; width: 100%; -webkit-user-select: text; user-select: text; }
-    .hidden { display: none !important; }
-
-    #join { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 14px; }
-    #join h1 { margin: 0; font-size: 28px; }
-    #join-btn { min-height: 80px; font-size: 24px; font-weight: 800; background: #3b82f6; }
-    #join-error { color: #f87171; min-height: 1.4em; }
-
-    #controller { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
-    #top { display: flex; align-items: center; gap: 10px; font-weight: 700; }
-    #swatch { width: 22px; height: 22px; border-radius: 50%; }
-    #conn { margin-left: auto; font-size: 13px; font-weight: 400; }
-    #conn.on { color: #4ade80; } #conn.off { color: #f87171; }
-
-    .phase-screen { background: #1b1e27; border-radius: 14px; padding: 12px; text-align: center; color: #9aa3b2; }
-    .phase-screen strong { display: block; color: #eef0f4; font-size: 20px; text-transform: uppercase; letter-spacing: .08em; }
-
-    #pad-row { flex: 1; min-height: 0; display: flex; gap: 12px; align-items: center; }
-    #stick { flex: 1; aspect-ratio: 1; max-height: 100%; max-width: 60%; position: relative; border-radius: 50%; background: #232733; touch-action: none; }
-    #knob { position: absolute; left: 50%; top: 50%; width: 38%; height: 38%; margin: -19% 0 0 -19%; border-radius: 50%; background: #4b5263; pointer-events: none; }
-    #buttons { flex: 1; display: flex; flex-direction: column; gap: 12px; }
-    #buttons button { min-height: 76px; font-size: 28px; font-weight: 800; touch-action: none; }
-    #btn-a { background: #22c55e; } #btn-b { background: #ef4444; }
-    #buttons button.down { filter: brightness(1.4); }
-
-    #tilt-row { display: flex; gap: 10px; align-items: center; }
-    #tilt-readout { flex: 1; font-variant-numeric: tabular-nums; color: #9aa3b2; font-size: 14px; }
-    #ready-btn { min-height: 52px; padding: 0 22px; background: #6366f1; font-weight: 700; }
-    #text-row { display: flex; gap: 8px; }
-    #send-btn { padding: 0 20px; background: #3b82f6; font-weight: 700; }
-  </style>
+  <link rel="stylesheet" href="/phone.css">
 </head>
-<body>
-  <section id="join">
-    <h1>Join the game</h1>
-    <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" autocapitalize="words" enterkeyhint="go">
-    <button id="join-btn">Tap to join</button>
-    <div id="join-error"></div>
-  </section>
+<body data-screen="join">
+  <header>
+    <span id="me-tag"></span>
+    <span id="timer" class="hidden"></span>
+    <span id="conn" class="off">●</span>
+  </header>
 
-  <section id="controller" class="hidden">
-    <div id="top">
-      <span id="swatch"></span><span id="player-name"></span>
-      <span id="conn" class="on">● connected</span>
-    </div>
+  <main>
+    <section data-screen="join">
+      <h1 class="title">Press<br>Conference</h1>
+      <form id="join-form">
+        <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" autocapitalize="words" enterkeyhint="go">
+        <button class="big" type="submit">Join</button>
+      </form>
+      <p id="join-error" class="error"></p>
+    </section>
 
-    <div class="phase-screen" data-phase="lobby"><strong>Lobby</strong>Waiting to start</div>
-    <div class="phase-screen hidden" data-phase="play"><strong>Play</strong>placeholder</div>
-    <div class="phase-screen hidden" data-phase="vote"><strong>Vote</strong>placeholder</div>
-    <div class="phase-screen hidden" data-phase="results"><strong>Results</strong>placeholder</div>
-
-    <div id="pad-row">
-      <div id="stick"><div id="knob"></div></div>
-      <div id="buttons">
-        <button id="btn-a" data-button="a">A</button>
-        <button id="btn-b" data-button="b">B</button>
+    <section data-screen="lobby">
+      <p class="kicker">You are</p>
+      <div class="char-card">
+        <div class="avatar"></div>
+        <h2 class="char-name"></h2>
+        <p class="char-title"></p>
       </div>
-    </div>
+      <p class="muted">Waiting for the host to start…</p>
+    </section>
 
-    <div id="tilt-row">
-      <div id="tilt-readout">tilt: –</div>
-      <button id="ready-btn">Ready</button>
-    </div>
+    <section data-screen="look">
+      <p class="kicker" id="look-kicker"></p>
+      <p class="look-text" id="look-text"></p>
+      <p class="muted" id="look-sub"></p>
+    </section>
 
-    <form id="text-row">
-      <input id="text" maxlength="280" placeholder="Type something…" autocomplete="off" enterkeyhint="send">
-      <button id="send-btn">Send</button>
-    </form>
-  </section>
+    <section data-screen="answer">
+      <p class="kicker"><span class="journalist"></span> asks</p>
+      <p class="question-text"></p>
+      <form id="answer-form">
+        <textarea id="answer" maxlength="200" placeholder="Your statement…" enterkeyhint="send"></textarea>
+        <div class="row">
+          <span id="answer-count" class="muted">0 / 200</span>
+          <button class="big" type="submit">Send</button>
+        </div>
+        <p id="answer-error" class="error"></p>
+      </form>
+      <div id="answer-sent" class="sent hidden">
+        <p class="kicker">Statement sent</p>
+        <p id="my-answer" class="quote"></p>
+        <p class="muted">Waiting for the others…</p>
+        <button id="edit-answer" class="ghost" type="button">Change my answer</button>
+      </div>
+    </section>
+
+    <section data-screen="vote">
+      <p class="kicker">Vote for the best answer</p>
+      <div id="vote-list" class="vote-list"></div>
+      <p id="vote-error" class="error"></p>
+    </section>
+
+    <section data-screen="results">
+      <p class="kicker" id="result-kicker">Results</p>
+      <p id="result-rank" class="look-text"></p>
+      <p id="result-score" class="muted"></p>
+    </section>
+  </main>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/phone.js"></script>

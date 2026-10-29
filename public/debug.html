@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Debug TV</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { margin: 0; padding: 16px; background: #111318; color: #eef0f4; font: 14px/1.4 system-ui, sans-serif; }
+    .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    button { border: 0; border-radius: 8px; padding: 9px 14px; background: #2c3140; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+    button.on { background: #16a34a; }
+    #phase { font-size: 22px; font-weight: 800; text-transform: uppercase; margin-left: 8px; }
+    #room { margin-left: auto; color: #9aa3b2; }
+    #room b { color: #eef0f4; font-size: 22px; letter-spacing: .1em; }
+    #timer { font-size: 22px; color: #fbbf24; font-variant-numeric: tabular-nums; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    pre, #log { background: #1b1e27; border-radius: 10px; padding: 12px; margin: 0; overflow: auto; height: calc(100vh - 110px); font: 12px/1.45 ui-monospace, Menlo, monospace; }
+    #log div { border-bottom: 1px solid #2a2f3c; padding: 3px 0; }
+    #subtitle { font-size: 18px; margin: 0 0 12px; min-height: 1.4em; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <button id="sound">Enable sound</button>
+    <button data-emit="bot:add">Add bot</button>
+    <button data-emit="game:start">Start</button>
+    <button data-emit="phase:next">Skip phase</button>
+    <button data-emit="game:reset">Reset</button>
+    <span id="phase">–</span><span id="timer"></span>
+    <span id="room"></span>
+  </div>
+  <div id="subtitle"></div>
+  <div class="cols">
+    <pre id="state"></pre>
+    <div id="log"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const socket = io();
+    const audio = new Audio();
+    let endsAt = null;
+
+    function log(text) {
+      const div = document.createElement('div');
+      div.textContent = `${new Date().toLocaleTimeString()}  ${text}`;
+      $('log').prepend(div);
+    }
+
+    $('sound').onclick = () => {
+      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+      audio.play().catch(() => {});
+      $('sound').textContent = 'Sound on';
+      $('sound').classList.add('on');
+    };
+    for (const b of document.querySelectorAll('[data-emit]')) {
+      b.onclick = () => socket.emit(b.dataset.emit, (res) => res && log(`${b.dataset.emit}: ${JSON.stringify(res)}`));
+    }
+
+    function render(state) {
+      $('phase').textContent = `${state.phase}${state.round ? ` · round ${state.round}/${state.totalRounds}` : ''}`;
+      endsAt = state.remainingMs == null ? null : performance.now() + state.remainingMs;
+      $('state').textContent = JSON.stringify(state, null, 2);
+    }
+    setInterval(() => {
+      $('timer').textContent = endsAt ? `${Math.ceil(Math.max(0, endsAt - performance.now()) / 1000)}s` : '';
+    }, 200);
+
+    // Plays a line, then tells the server it's done. Without audio, shows the text for a moment.
+    function play(url, text, done) {
+      $('subtitle').textContent = text;
+      const t0 = performance.now();
+      const finish = () => {
+        audio.onended = audio.onerror = null;
+        done();
+      };
+      if (!url) return setTimeout(finish, 2500);
+      audio.onplaying = () => log(`audio started after ${Math.round(performance.now() - t0)} ms`);
+      audio.onended = finish;
+      audio.onerror = () => { log('audio failed, skipping'); finish(); };
+      audio.src = url;
+      audio.play().catch((err) => { log(`audio blocked (${err.message}). Click "Enable sound"`); finish(); });
+    }
+
+    // Keep the room across refreshes: the code lives in the URL.
+    const params = new URLSearchParams(location.search);
+    socket.on('connect', () => socket.emit('tv:join', { roomCode: params.get('room') }, (res) => {
+      if (res.error) return log(res.error);
+      params.set('room', res.roomCode);
+      history.replaceState(null, '', `?${params}`);
+      const joinUrl = `${location.origin}/?room=${res.roomCode}`;
+      $('room').innerHTML = `room <b>${res.roomCode}</b> · phones: <a href="${joinUrl}" target="_blank" style="color:#93c5fd">${joinUrl}</a>`;
+      render(res.state);
+    }));
+    socket.on('game:state', render);
+    socket.on('question:ask', (q) => {
+      log(`question:ask  ${q.journalist.name} (${q.journalist.outlet}): ${q.text}`);
+      play(q.audioUrl, `${q.journalist.name}: ${q.text}`, () => socket.emit('question:done', { round: q.round }));
+    });
+    socket.on('hearing:line', (l) => {
+      log(`hearing:line ${l.index + 1}/${l.total}  ${l.character?.name}: ${l.text}`);
+      play(l.audioUrl, `${l.character?.name}: ${l.text}`, () => socket.emit('hearing:done', { index: l.index }));
+    });
+  </script>
+</body>
+</html>
