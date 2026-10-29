@@ -13,6 +13,7 @@
     <span id="me-tag"></span>
     <span id="timer" class="hidden"></span>
     <span id="conn" class="off">●</span>
+    <button id="exit" class="exit hidden" type="button">Exit</button>
   </header>
 
   <main>
@@ -81,11 +82,28 @@
       <p id="pick-done" class="muted center hidden">Vote in! You can still change it.</p>
     </section>
 
+    <section data-screen="sabotage">
+      <p class="kicker">🤫 You're hacking the teleprompter</p>
+      <p class="muted">The politician was asked:</p>
+      <p class="question-text"></p>
+      <form id="sabotage-form">
+        <textarea id="opener" maxlength="90" placeholder="Write how their answer starts… e.g. &quot;As a proud lizard, I&quot;" enterkeyhint="send"></textarea>
+        <div class="row">
+          <span id="opener-count" class="muted">0 / 90</span>
+          <button class="big" type="submit">Hack it</button>
+        </div>
+        <p class="muted">They have to finish your sentence, live. Nobody finds out it was you until the results.</p>
+        <p id="sabotage-error" class="error"></p>
+      </form>
+    </section>
+
     <section data-screen="answer">
       <p class="kicker"><span class="asker"></span> asks</p>
       <p class="question-text"></p>
+      <p class="muted">Your teleprompter says (someone wrote this for you):</p>
+      <p id="teleprompter" class="teleprompter"></p>
       <form id="answer-form">
-        <textarea id="answer" maxlength="200" placeholder="Your answer… dodge it!" enterkeyhint="send"></textarea>
+        <textarea id="answer" maxlength="200" placeholder="…finish the sentence!" enterkeyhint="send"></textarea>
         <div class="row">
           <span id="answer-count" class="muted">0 / 200</span>
           <button class="big" type="submit">Answer</button>
@@ -100,6 +118,14 @@
       <div id="stars" class="stars"></div>
       <p id="rate-error" class="error"></p>
       <p id="rate-done" class="muted center hidden">Rating in! You can still change it.</p>
+      <p class="kicker heckle-title">Heckle</p>
+      <div class="heckles"></div>
+    </section>
+
+    <section data-screen="heckle">
+      <p class="kicker">Heckle the politician!</p>
+      <p class="muted">Every tap shows up on the TV.</p>
+      <div class="heckles big-heckles"></div>
     </section>
 
     <section data-screen="results">

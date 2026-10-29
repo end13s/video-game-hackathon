@@ -38,7 +38,7 @@
   };
   const MURMUR_UNDER_SPEECH = 0.06; // crowd volume while someone is on stage
   const REACTIONS = ['laugh', 'laugh', 'gasp', 'applause', 'boo'];
-  const TIMED = ['ask', 'pick', 'answer', 'rate']; // phases with a countdown
+  const TIMED = ['ask', 'pick', 'sabotage', 'answer', 'rate']; // phases with a countdown
   const COUNTDOWN_MS = 5000; // length of countdown.mp3, it starts this long before the timer ends
   const MAX_LINE_MS = 20000; // give up on an anchor line that never ends
 
@@ -213,7 +213,7 @@
     if (from === 'results' || from === 'final') stopAnchor();
 
     loop('intro', phase === 'lobby');
-    if (['ask', 'pick', 'question', 'answer', 'rate'].includes(phase)) loop('murmur', true);
+    if (['ask', 'pick', 'question', 'sabotage', 'answer', 'rate'].includes(phase)) loop('murmur', true);
     else if (phase === 'hearing') loop('murmur', true, MURMUR_UNDER_SPEECH);
     else loop('murmur', false);
 

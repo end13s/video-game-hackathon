@@ -1,4 +1,4 @@
-// Fake players for testing without phones. They join, ask, vote, answer and rate by themselves.
+// Fake players for testing without phones. They join, ask, vote, sabotage, answer, heckle and rate by themselves.
 // Usage: npm run bots -- <ROOM> [count] [url]     e.g. npm run bots -- ABCD 3
 // The TV can also add bots itself (they run inside the server); this script is for load testing.
 const { io } = require('socket.io-client');
@@ -30,6 +30,13 @@ for (let i = 0; i < count; i++) {
     });
   });
 
+  // Picked to write the teleprompter.
+  socket.on('you', async (you) => {
+    if (!you.saboteur) return;
+    await wait(1000, 4000);
+    socket.emit('opener:submit', { text: pick(content.openers) }, () => {});
+  });
+
   socket.on('game:state', async (state) => {
     const atPodium = state.politicianId === playerId;
     const step = `${state.phase}:${state.round}`;
@@ -51,6 +58,13 @@ for (let i = 0; i < count; i++) {
       done.add(step);
       await wait(1000, 4000);
       socket.emit('answer:submit', { text: pick(content.botAnswers) }, () => {});
+    }
+    if (state.phase === 'hearing' && !atPodium) {
+      done.add(step);
+      for (let i = 0; i < 3; i++) {
+        await wait(500, 2000);
+        socket.emit('crowd:react', { type: pick(['laugh', 'applause', 'gasp', 'boo', 'tomato', 'liar']) }, () => {});
+      }
     }
     if (state.phase === 'rate' && !atPodium) {
       done.add(step);

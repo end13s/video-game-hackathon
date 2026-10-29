@@ -1,8 +1,9 @@
 // Press Conference game server. The TV opens /tv and gets a room code;
 // phones open /?room=CODE (the TV shows it as a QR code).
 // Each round one player is the politician at the podium. The others are journalists:
-// they write questions about the round's headline, vote for the best one, and rate
-// the politician's answer to it.
+// they write questions about the round's headline and vote for the best one. One of them
+// secretly writes how the politician's answer starts (the teleprompter), the politician
+// finishes it, and the press heckles and rates the result.
 // Message list: docs/press-conference.md
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
@@ -25,6 +26,7 @@ const TTS_MODEL = process.env.ELEVENLABS_MODEL_ID || 'eleven_v4_turbo';
 const ROUNDS = Number(process.env.ROUNDS) || 0;
 const ASK_MS = 40000;
 const PICK_MS = 20000;
+const SABOTAGE_MS = 25000;
 const ANSWER_MS = 45000;
 const RATE_MS = 20000;
 const RESULTS_MS = 10000;
@@ -41,6 +43,9 @@ const MAX_PLAYERS = 6;
 const MAX_NAME = 16;
 const MAX_QUESTION = 160;
 const MAX_ANSWER = 200;
+const MAX_OPENER = 90;
+const REACT_GAP_MS = 400; // per player, so nobody floods the room
+const REACTIONS = ['laugh', 'applause', 'gasp', 'boo', 'tomato', 'liar'];
 const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316'];
 const BOT_NAMES = content.botNames || ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'];
 // Number of choices per avatar part; must match LOOK_OPTIONS in public/avatar.js.
@@ -132,6 +137,17 @@ function addDelivery(text) {
 // Rough time to read a line aloud, used when the TV doesn't tell us it finished.
 const speakingMs = (text, max) => Math.min(max, 3000 + text.length * 80);
 
+// "My goose and I" + "Love long walks." reads "My goose and I love long walks."
+function joinSentence(start, end) {
+  end = end.trim();
+  // Lower the first letter (after any [audio tags]), except for "I".
+  if (!/[.!?…:]$/.test(start.trim())) {
+    end = end.replace(/^((?:\[[^\]]*\]\s*)*)(\S+)/, (m, tags, word) =>
+      tags + (/^I('|$)/.test(word) ? word : word.charAt(0).toLowerCase() + word.slice(1)));
+  }
+  return `${start} ${end}`.replace(/\s+/g, ' ').trim();
+}
+
 const cleanName = (name) => String(name || '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME) || 'Player';
 const cleanText = (text, max) => String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -181,7 +197,8 @@ class Room {
     this.headline = null; // { text, questions } this round's scandal
     this.asks = new Map(); // journalistId -> question text
     this.questionVotes = new Map(); // voterId -> journalistId whose question they picked
-    this.chosen = null; // { journalistId, question, answer } the question that gets asked
+    this.chosen = null; // { journalistId, question, opener, answer } the question that gets asked
+    this.saboteurId = null; // the journalist writing the teleprompter this round
     this.ratings = new Map(); // journalistId -> 1..5 stars for the answer
     this.results = null;
     this.endsAt = null; // only for phases with a visible countdown
@@ -218,7 +235,8 @@ class Room {
 
   publicState() {
     const showQuestions = this.phase === 'pick';
-    const showChosen = ['question', 'answer', 'hearing', 'rate', 'results', 'final'].includes(this.phase);
+    const showChosen = ['question', 'sabotage', 'answer', 'hearing', 'rate', 'results', 'final'].includes(this.phase);
+    const showOpener = ['answer', 'hearing', 'rate', 'results', 'final'].includes(this.phase);
     const showAnswer = ['hearing', 'rate', 'results', 'final'].includes(this.phase);
     return {
       roomCode: this.code,
@@ -232,7 +250,12 @@ class Room {
       // While picking, questions don't say who wrote them.
       questions: showQuestions ? [...this.asks.entries()].map(([id, text]) => ({ id, text })) : [],
       chosen: showChosen && this.chosen
-        ? { journalistId: this.chosen.journalistId, question: this.chosen.question, answer: showAnswer ? this.chosen.answer : null }
+        ? {
+            journalistId: this.chosen.journalistId,
+            question: this.chosen.question,
+            opener: showOpener ? this.chosen.opener : null,
+            answer: showAnswer ? this.chosen.answer : null,
+          }
         : null,
       results: this.results,
     };
@@ -250,6 +273,7 @@ class Room {
       player: p ? this.publicPlayer(p) : null,
       role,
       question: this.asks.get(playerId) || null,
+      saboteur: this.phase === 'sabotage' && playerId === this.saboteurId,
       votes: { question: this.questionVotes.get(playerId) || null, stars: this.ratings.get(playerId) || null },
     };
   }
@@ -344,6 +368,7 @@ class Room {
     this.ratings.clear();
     this.chosen = null;
     this.pickTally = null;
+    this.saboteurId = null;
     this.results = null;
     this.setPhase('ask', { timerMs: ASK_MS, visible: true, onTimeout: () => this.closeAsks() });
     this.sendYouAll();
@@ -392,7 +417,7 @@ class Room {
     const top = Math.max(...tally.values());
     const journalistId = pick([...tally.keys()].filter((id) => tally.get(id) === top));
     this.pickTally = Object.fromEntries([...tally].filter(([id]) => id));
-    this.chosen = { journalistId, question: this.asks.get(journalistId), answer: null };
+    this.chosen = { journalistId, question: this.asks.get(journalistId), opener: null, answer: null };
     this.askQuestion();
   }
 
@@ -402,7 +427,7 @@ class Room {
     const round = this.round;
     // Backup questions may have a pre-made MP3 (npm run audio:questions).
     const premade = content.questions.find((q) => q.text === question && q.audio);
-    this.setPhase('question', { timerMs: speakingMs(question, MAX_QUESTION_MS), onTimeout: () => this.startAnswer() });
+    this.setPhase('question', { timerMs: speakingMs(question, MAX_QUESTION_MS), onTimeout: () => this.startSabotage() });
     this.emit('question:ask', {
       round,
       text: question,
@@ -411,10 +436,38 @@ class Room {
     });
   }
 
-  startAnswer() {
-    this.setPhase('answer', { timerMs: ANSWER_MS, visible: true, onTimeout: () => this.closeAnswer() });
+  // A journalist secretly writes how the politician's answer starts. Preferably not the
+  // one whose question was picked, so more people get a turn.
+  startSabotage() {
+    const journalists = this.activeJournalists();
+    const others = journalists.filter((p) => p.id !== this.chosen.journalistId);
+    this.saboteurId = (pick(others.length ? others : journalists) || {}).id || null;
+    if (!this.saboteurId) return this.closeSabotage();
+    this.setPhase('sabotage', { timerMs: SABOTAGE_MS, visible: true, onTimeout: () => this.closeSabotage() });
+    this.sendYouAll();
   }
 
+  submitOpener(playerId, text) {
+    if (this.phase !== 'sabotage') return { error: 'Too late, the teleprompter is locked' };
+    if (playerId !== this.saboteurId) return { error: "It's not your turn to sabotage" };
+    text = stripTags(cleanText(text, MAX_OPENER));
+    if (!text) return { error: 'Write something' };
+    this.chosen.opener = text;
+    this.closeSabotage();
+    return { ok: true };
+  }
+
+  closeSabotage() {
+    if (!this.chosen.opener) this.chosen.opener = pick(content.openers);
+    this.startAnswer();
+  }
+
+  startAnswer() {
+    this.setPhase('answer', { timerMs: ANSWER_MS, visible: true, onTimeout: () => this.closeAnswer() });
+    this.sendYouAll();
+  }
+
+  // The politician finishes the sentence the teleprompter started.
   submitAnswer(playerId, text) {
     if (this.phase !== 'answer') return { error: 'Not answering right now' };
     if (playerId !== this.politicianId) return { error: "You're not at the podium" };
@@ -424,8 +477,9 @@ class Room {
     return { ok: true };
   }
 
-  // If time runs out, a stock dodge is said for them.
-  closeAnswer(text = pick(content.stockAnswers)) {
+  // If time runs out, a stock dodge finishes it for them.
+  closeAnswer(ending = `... ${pick(content.stockAnswers)}`) {
+    const text = joinSentence(this.chosen.opener, ending);
     const p = this.players.get(this.politicianId);
     const character = p && content.politicians.find((c) => c.id === p.characterId);
     const speech = addDelivery(text);
@@ -440,6 +494,7 @@ class Room {
       playerId: this.politicianId,
       character: p ? characterInfo(p.characterId) : null,
       text: this.chosen.answer,
+      opener: this.chosen.opener,
       audioUrl,
     });
   }
@@ -477,6 +532,7 @@ class Room {
     }
     this.results = {
       bestQuestion: author || null,
+      saboteurId: this.saboteurId,
       questionVotes: this.pickTally || {},
       rating: { average: Math.round(average * 10) / 10, count: stars.length },
       points,
@@ -497,7 +553,7 @@ class Room {
   reset() {
     clearTimeout(this.timer);
     for (const p of this.players.values()) p.score = 0;
-    Object.assign(this, { round: 0, totalRounds: 0, politicianId: null, headline: null, chosen: null, results: null, endsAt: null, timer: null });
+    Object.assign(this, { round: 0, totalRounds: 0, politicianId: null, headline: null, chosen: null, saboteurId: null, results: null, endsAt: null, timer: null });
     this.asks.clear();
     this.questionVotes.clear();
     this.ratings.clear();
@@ -570,7 +626,7 @@ class Room {
     return { ok: true };
   }
 
-  // Bots ask, vote, answer and rate a few seconds into each phase, like slow humans.
+  // Bots ask, vote, sabotage, answer, heckle and rate a few seconds into each phase, like slow humans.
   runBots() {
     const round = this.round;
     const still = (phase) => this.phase === phase && this.round === round;
@@ -585,6 +641,13 @@ class Room {
           if (still('pick') && others.length) this.voteQuestion(bot.id, pick(others));
         }, randomMs(2000, 7000));
       }
+      if (this.phase === 'sabotage' && bot.id === this.saboteurId) {
+        setTimeout(() => still('sabotage') && this.submitOpener(bot.id, pick(content.openers)), randomMs(3000, 8000));
+      }
+      if ((this.phase === 'hearing' || this.phase === 'rate') && !atPodium) {
+        const phase = this.phase;
+        for (let i = 0; i < 3; i++) setTimeout(() => still(phase) && this.react(bot.id, pick(REACTIONS)), randomMs(800, 7000));
+      }
       if (this.phase === 'answer' && atPodium) {
         setTimeout(() => still('answer') && this.submitAnswer(bot.id, pick(content.botAnswers)), randomMs(3000, 8000));
       }
@@ -592,6 +655,32 @@ class Room {
         setTimeout(() => still('rate') && this.rateAnswer(bot.id, 2 + Math.floor(Math.random() * 4)), randomMs(2000, 6000));
       }
     }
+  }
+
+  // Journalists heckle while the answer plays and while it's rated. The TV shows it.
+  react(playerId, type) {
+    if (!['hearing', 'rate'].includes(this.phase)) return { error: 'Not now' };
+    if (playerId === this.politicianId) return { error: "You can't heckle yourself" };
+    if (!REACTIONS.includes(type)) return { error: 'Unknown reaction' };
+    const p = this.players.get(playerId);
+    if (Date.now() - (p.lastReact || 0) < REACT_GAP_MS) return { error: 'Slow down' };
+    p.lastReact = Date.now();
+    this.emit('crowd:react', { playerId, type });
+    return { ok: true };
+  }
+
+  // Exit button on the phone. In the lobby the player is gone for good; mid-game they
+  // count as disconnected, so the round carries on without them.
+  leave(playerId) {
+    const p = this.players.get(playerId);
+    if (this.phase === 'lobby') {
+      clearTimeout(p.dropTimer);
+      this.players.delete(playerId);
+      this.broadcast();
+    } else {
+      this.playerLeft(p);
+    }
+    return { ok: true };
   }
 
   playerLeft(player) {
@@ -686,6 +775,13 @@ io.on('connection', (socket) => {
   playerAction('vote:question', (r, id, { targetId }) => r.voteQuestion(id, targetId));
   playerAction('answer:submit', (r, id, { text }) => r.submitAnswer(id, text));
   playerAction('answer:rate', (r, id, { stars }) => r.rateAnswer(id, stars));
+  playerAction('opener:submit', (r, id, { text }) => r.submitOpener(id, text));
+  playerAction('crowd:react', (r, id, { type }) => r.react(id, type));
+  playerAction('player:leave', (r, id) => {
+    socket.leave(`${r.code}:${id}`);
+    socket.data.playerId = null;
+    return r.leave(id);
+  });
 
   // TV only from here on.
   const tvRoom = () => (socket.data.tv ? room() : null);
@@ -714,7 +810,7 @@ io.on('connection', (socket) => {
 
   socket.on('question:done', ({ round } = {}) => {
     const r = tvRoom();
-    if (r && r.phase === 'question' && round === r.round) r.startAnswer();
+    if (r && r.phase === 'question' && round === r.round) r.startSabotage();
   });
 
   socket.on('hearing:done', ({ round } = {}) => {

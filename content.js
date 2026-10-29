@@ -100,6 +100,21 @@ const content = {
     { text: 'Final question: in one sentence, why should anyone ever vote for you again?', journalist: 'j3' },
   ],
 
+  // Teleprompter openers: used when the saboteur doesn't write one in time, and by bots.
+  // The politician has to finish the sentence.
+  openers: [
+    'Before I answer, I have to confess that I',
+    'Let me be clear: my pet goose and I',
+    'As a proud member of the lizard community,',
+    'I was told not to say this on camera, but',
+    'First of all, I love you all, especially',
+    'The truth is, every night at 3 AM I',
+    'In my defense, the voices told me',
+    'My lawyer says I can only answer in song, so',
+    'I would never lie to you, which is why I secretly',
+    'Thank you for the question. Also, I am three raccoons in a suit and',
+  ],
+
   // Said for the politician when they run out of time to answer.
   stockAnswers: [
     'No comment.',

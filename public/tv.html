@@ -64,6 +64,7 @@
     </svg>
   </div>
 
+  <div id="fx"></div>
   <div id="flash"></div>
   <button id="sound">Click to enable sound</button>
 
@@ -71,6 +72,7 @@
     <div class="bug"><span class="live">● LIVE</span><span class="channel">PRESS CONFERENCE</span></div>
     <p class="round-tag"></p>
     <div id="timer" class="hidden"><span id="timer-num">0</span></div>
+    <button id="exit" class="exit-btn">Exit to menu (Esc)</button>
   </header>
 
   <main>
@@ -111,6 +113,11 @@
         <p class="headline small"></p>
         <p id="stage-status" class="status"></p>
       </div>
+      <div id="prompter" class="prompter">
+        <p class="prompter-label">Teleprompter</p>
+        <p id="prompter-text" class="prompter-text"></p>
+      </div>
+      <div id="meter" class="meter"><div id="meter-fill" class="meter-fill"></div><span class="meter-label">Approval</span></div>
       <div id="subtitle" class="lower-third hidden">
         <p id="sub-name" class="lt-name"></p>
         <p id="sub-text" class="lt-text"></p>

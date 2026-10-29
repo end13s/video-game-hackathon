@@ -48,6 +48,7 @@ function join() {
     $('join-error').textContent = 'Scan the QR code on the TV to join.';
     return show('join');
   }
+  storageSet('pcLeft', '');
   socket.emit('player:join', { roomCode, playerId, name }, (res) => {
     if (res.error) {
       $('join-error').textContent = res.error;
@@ -67,8 +68,8 @@ $('join-form').onsubmit = (e) => {
 
 socket.on('connect', () => {
   $('conn').className = 'on';
-  // Rejoin automatically after a refresh or a dropped connection.
-  if (storageGet('pcName')) join();
+  // Rejoin automatically after a refresh or a dropped connection, unless they pressed Exit.
+  if (storageGet('pcName') && !storageGet('pcLeft')) join();
 });
 socket.on('disconnect', () => ($('conn').className = 'off'));
 socket.on('you', setYou);
@@ -107,6 +108,7 @@ function look(kicker, text, sub = '', avatarOf = null) {
 }
 
 function render() {
+  $('exit').classList.toggle('hidden', !you?.player);
   if (!you?.player || !state) return show('join');
   const me = playerById(you.player.id) || you.player;
   const politician = playerById(state.politicianId);
@@ -127,12 +129,16 @@ function render() {
     case 'question':
       if (atPodium) return look('Incoming question', 'Look at the TV', 'Your answer box opens next.', me);
       return look('Eyes on the TV', 'The question is being asked…', '', politician);
+    case 'sabotage':
+      if (you.saboteur) return renderSabotage();
+      if (atPodium) return look('Uh oh', '😰 Your teleprompter is glitching…', 'Someone is writing how your answer starts.', me);
+      return look('Psst', 'Someone is hacking the teleprompter…', 'Is it you? Is it them? Nobody knows.', politician);
     case 'answer':
       if (atPodium) return renderAnswer();
       return look('Eyes on the TV', `${charName(politician)} is writing a dodge…`, '', politician);
     case 'hearing':
-      if (atPodium) return look('You have the floor', '🎤 Your answer is playing', 'Look at the TV.', me);
-      return look('Eyes on the TV', `${charName(politician)} responds`, '', politician);
+      if (atPodium) return look('You have the floor', '🎤 Your answer is playing', 'Look at the TV. Brace for tomatoes.', me);
+      return show('heckle');
     case 'rate':
       if (atPodium) return look('The press is rating you', 'How did your dodge land?', '', me);
       return renderRate();
@@ -243,6 +249,7 @@ function renderAnswer() {
   const asker = playerById(c?.journalistId);
   setAll('.asker', asker ? `${asker.name}, ${asker.outlet}` : 'The press');
   setAll('.question-text', c?.question || '');
+  $('teleprompter').textContent = c?.opener || '';
   // A new round clears the box.
   if (answeringRound !== state.round) {
     answeringRound = state.round;
@@ -295,11 +302,71 @@ $('stars').onclick = (e) => {
   });
 };
 
+// ---- sabotage (one journalist) -------------------------------------------
+
+function renderSabotage() {
+  setAll('.question-text', state.chosen?.question || '');
+  show('sabotage');
+}
+
+$('opener').oninput = () => ($('opener-count').textContent = `${$('opener').value.length} / 90`);
+submitOnEnter($('opener'), $('sabotage-form'));
+$('sabotage-form').onsubmit = (e) => {
+  e.preventDefault();
+  const text = $('opener').value.trim();
+  if (!text) return $('opener').focus();
+  $('opener').blur();
+  socket.emit('opener:submit', { text }, (res) => {
+    $('sabotage-error').textContent = res?.error || '';
+    if (res?.error) return;
+    $('opener').value = '';
+    $('opener').oninput();
+    navigator.vibrate?.(40);
+  });
+};
+
+// ---- heckling (journalists, while the answer plays and is rated) ----------
+
+const HECKLES = [['laugh', '😂'], ['applause', '👏'], ['gasp', '😱'], ['boo', '👎'], ['tomato', '🍅'], ['liar', 'LIAR!']];
+for (const el of document.querySelectorAll('.heckles')) {
+  el.innerHTML = HECKLES.map(([type, label]) => `<button type="button" data-type="${type}" class="${label.length > 2 ? 'word' : ''}">${label}</button>`).join('');
+  el.onclick = (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    navigator.vibrate?.(15);
+    socket.emit('crowd:react', { type: btn.dataset.type }, () => {});
+  };
+}
+
+// ---- exit -----------------------------------------------------------------
+
+// Tap twice: the first tap asks to confirm.
+let exitTimer = null;
+$('exit').onclick = () => {
+  if (!$('exit').classList.contains('confirm')) {
+    $('exit').classList.add('confirm');
+    $('exit').textContent = 'Tap again to leave';
+    exitTimer = setTimeout(resetExit, 3000);
+    return;
+  }
+  resetExit();
+  socket.emit('player:leave', {}, () => {});
+  storageSet('pcLeft', '1');
+  you = null;
+  $('me-tag').textContent = '';
+  render();
+};
+function resetExit() {
+  clearTimeout(exitTimer);
+  $('exit').classList.remove('confirm');
+  $('exit').textContent = 'Exit';
+}
+
 // ---- results ---------------------------------------------------------------
 
 function renderResults(me) {
   const final = state.phase === 'final';
-  const { bestQuestion = null, rating = {}, points = {} } = state.results || {};
+  const { bestQuestion = null, saboteurId = null, rating = {}, points = {} } = state.results || {};
   const ranked = [...state.players].sort((a, b) => b.score - a.score);
   const rank = ranked.findIndex((p) => p.id === me.id) + 1;
   const wasPolitician = state.politicianId === me.id;
@@ -316,6 +383,7 @@ function renderResults(me) {
       $('result-rank').textContent = rating.count ? `Your answer: ${'★'.repeat(n)}${'☆'.repeat(5 - n)} (${rating.average})` : 'Nobody rated you';
     } else {
       $('result-rank').textContent = bestQuestion === me.id ? 'Your question won!' : 'Your question wasn\'t picked';
+      if (saboteurId === me.id) $('result-rank').textContent += ' · You hacked the teleprompter 😈';
     }
     $('result-score').textContent = `+${points[me.id] || 0} this round · ${me.score} points · #${rank}`;
   }
