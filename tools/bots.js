@@ -1,4 +1,4 @@
-// Fake players for testing without phones. They join, ask, dodge and vote by themselves.
+// Fake players for testing without phones. They join, ask, vote, answer and rate by themselves.
 // Usage: npm run bots -- <ROOM> [count] [url]     e.g. npm run bots -- ABCD 3
 // The TV can also add bots itself (they run inside the server); this script is for load testing.
 const { io } = require('socket.io-client');
@@ -21,7 +21,7 @@ for (let i = 0; i < count; i++) {
   const name = `${NAMES[i]} (bot)`;
   const playerId = `ext-bot-${roomCode}-${i}`;
   const socket = io(url);
-  const done = new Set(); // phase steps already handled, e.g. "ask:1" or "answer:1:0"
+  const done = new Set(); // phases already handled this round, e.g. "ask:1"
 
   socket.on('connect', () => {
     socket.emit('player:join', { roomCode, playerId, name }, (res) => {
@@ -32,7 +32,7 @@ for (let i = 0; i < count; i++) {
 
   socket.on('game:state', async (state) => {
     const atPodium = state.politicianId === playerId;
-    const step = `${state.phase}:${state.round}:${state.grill?.index ?? ''}`;
+    const step = `${state.phase}:${state.round}`;
     if (done.has(step)) return;
 
     if (state.phase === 'ask' && !atPodium) {
@@ -40,19 +40,22 @@ for (let i = 0; i < count; i++) {
       await wait(1000, 5000);
       socket.emit('question:submit', { text: pick(content.questions).text }, () => {});
     }
+    if (state.phase === 'pick' && !atPodium) {
+      done.add(step);
+      const others = state.questions.filter((q) => q.id !== playerId);
+      if (!others.length) return;
+      await wait(1000, 4000);
+      socket.emit('vote:question', { targetId: pick(others).id }, () => {});
+    }
     if (state.phase === 'answer' && atPodium) {
       done.add(step);
       await wait(1000, 4000);
-      const cards = state.talkingPoints.filter((c) => !c.used);
-      const card = pick(cards.length ? cards : state.talkingPoints);
-      socket.emit('answer:submit', { text: pick(content.botDodges).replace('{point}', card.text) }, () => {});
+      socket.emit('answer:submit', { text: pick(content.botAnswers) }, () => {});
     }
-    if (state.phase === 'vote') {
+    if (state.phase === 'rate' && !atPodium) {
       done.add(step);
       await wait(1000, 4000);
-      const others = state.transcript.filter((t) => t.journalistId !== playerId);
-      if (others.length) socket.emit('vote:question', { targetId: pick(others).journalistId }, () => {});
-      if (!atPodium) socket.emit('vote:dodge', { stars: 2 + Math.floor(Math.random() * 4) }, () => {});
+      socket.emit('answer:rate', { stars: 2 + Math.floor(Math.random() * 4) }, () => {});
     }
   });
 

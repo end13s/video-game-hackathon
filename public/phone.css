@@ -84,10 +84,12 @@ textarea { height: 120px; resize: none; }
 .ghost { min-height: 48px; border: 2px solid var(--muted); border-radius: 12px; background: none; color: var(--white); font: inherit; font-weight: 700; }
 .spotlight { color: var(--gold); }
 
-/* ---- roles, creator, talking points, stars ------------------------------ */
+/* ---- roles, creator, stars ---------------------------------------------- */
 body[data-screen="create"] [data-screen="create"],
 body[data-screen="ask"] [data-screen="ask"],
-body[data-screen="podium"] [data-screen="podium"] { display: flex; }
+body[data-screen="podium"] [data-screen="podium"],
+body[data-screen="pick"] [data-screen="pick"],
+body[data-screen="rate"] [data-screen="rate"] { display: flex; }
 section[data-screen="podium"] { justify-content: center; }
 .center { text-align: center; }
 .prompt { margin: 0; font-size: 19px; font-weight: 600; }
@@ -106,14 +108,12 @@ section[data-screen="podium"] { justify-content: center; }
 .look-value { text-align: center; font-weight: 700; display: grid; place-items: center; }
 .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--white); }
 
-.cards { display: flex; flex-wrap: wrap; gap: 8px; }
-.card-btn {
-  min-height: 44px; padding: 8px 14px; border: 0; border-radius: 10px;
-  background: var(--gold); color: var(--navy); font: inherit; font-weight: 800; text-transform: uppercase; font-size: 14px;
-}
-.card-btn.used { background: #3a4565; color: var(--muted); text-decoration: line-through; }
-.small-cards .card-btn { min-height: 32px; padding: 4px 10px; font-size: 12px; pointer-events: none; }
 
 .stars { display: flex; gap: 6px; }
 .stars button { flex: 1; height: 56px; border: 0; border-radius: 12px; background: var(--navy-2); color: #4b5778; font-size: 30px; }
 .stars button.on { color: var(--gold); }
+
+.headline {
+  margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--white); color: var(--navy);
+  border-left: 8px solid var(--red); font-size: 20px; font-weight: 900; line-height: 1.2;
+}

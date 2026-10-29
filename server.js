@@ -1,6 +1,8 @@
 // Press Conference game server. The TV opens /tv and gets a room code;
 // phones open /?room=CODE (the TV shows it as a QR code).
-// Each round one player is the politician at the podium and the others are journalists.
+// Each round one player is the politician at the podium. The others are journalists:
+// they write questions about the round's headline, vote for the best one, and rate
+// the politician's answer to it.
 // Message list: docs/press-conference.md
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
@@ -22,8 +24,9 @@ const TTS_MODEL = process.env.ELEVENLABS_MODEL_ID || 'eleven_v4_turbo';
 // Without ROUNDS, everyone takes the podium once.
 const ROUNDS = Number(process.env.ROUNDS) || 0;
 const ASK_MS = 40000;
-const ANSWER_MS = 40000;
-const VOTE_MS = 25000;
+const PICK_MS = 20000;
+const ANSWER_MS = 45000;
+const RATE_MS = 20000;
 const RESULTS_MS = 10000;
 const MAX_QUESTION_MS = 20000;
 const MAX_LINE_MS = 25000;
@@ -31,10 +34,8 @@ const LOBBY_DROP_MS = 30000; // forget players who leave the lobby and don't com
 const GRACE_MS = 15000; // a refresh or network blip doesn't count as leaving the round
 const EMPTY_ROOM_MS = 10 * 60 * 1000; // delete rooms nobody has been in for this long
 const MAX_ROOMS = 30;
-const POINTS_PER_VOTE = 100; // journalists: per vote for toughest question
-const POINTS_PER_STAR = 100; // politician: average dodge rating times this
-const MIN_HAND = 3;
-const MAX_HAND = 4;
+const BEST_QUESTION_POINTS = 200; // the journalist whose question was picked
+const POINTS_PER_STAR = 100; // politician: average rating times this
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 6;
 const MAX_NAME = 16;
@@ -134,10 +135,6 @@ const speakingMs = (text, max) => Math.min(max, 3000 + text.length * 80);
 const cleanName = (name) => String(name || '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME) || 'Player';
 const cleanText = (text, max) => String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
-// "Family values!" matches "family values", so punctuation and case don't matter.
-const words = (s) => ` ${String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
-const mentions = (text, point) => words(text).includes(words(point));
-
 function characterInfo(characterId) {
   const c = content.politicians.find((p) => p.id === characterId);
   return c ? { id: c.id, name: c.name, title: c.title } : null;
@@ -181,18 +178,18 @@ class Room {
     this.totalRounds = 0;
     this.order = []; // playerIds, whose turn it is at the podium
     this.politicianId = null;
-    this.hand = []; // [{ text, used }] the politician's talking points this round
-    this.asks = new Map(); // journalistId -> question text, while asking
-    this.grill = []; // [{ journalistId, question, questionAudio, answer, talkingPoint }] in asking order
-    this.grillIndex = -1;
-    this.questionVotes = new Map(); // voterId -> journalistId
-    this.ratings = new Map(); // journalistId -> 1..5
+    this.headline = null; // { text, questions } this round's scandal
+    this.asks = new Map(); // journalistId -> question text
+    this.questionVotes = new Map(); // voterId -> journalistId whose question they picked
+    this.chosen = null; // { journalistId, question, answer } the question that gets asked
+    this.ratings = new Map(); // journalistId -> 1..5 stars for the answer
     this.results = null;
     this.endsAt = null; // only for phases with a visible countdown
     this.timer = null;
     this.onTimeout = null;
     this.backupLeft = [];
-    this.pointsLeft = [];
+    this.headlinesLeft = [];
+    this.headlineQuestions = [];
     this.lastSeen = Date.now();
   }
 
@@ -202,21 +199,7 @@ class Room {
 
   // ---- state ----
 
-  // Every vote a player still owes this round.
-  ballots(id) {
-    return {
-      question: this.grill.some((g) => g.journalistId !== id),
-      dodge: id !== this.politicianId,
-    };
-  }
-
-  hasVoted(id) {
-    const need = this.ballots(id);
-    return (!need.question || this.questionVotes.has(id)) && (!need.dodge || this.ratings.has(id));
-  }
-
   publicPlayer(p) {
-    const press = pressOf(p);
     return {
       id: p.id,
       name: p.name,
@@ -226,16 +209,17 @@ class Room {
       score: p.score,
       character: characterInfo(p.characterId),
       look: p.look,
-      outlet: press.outlet,
+      outlet: pressOf(p).outlet,
       asked: this.asks.has(p.id),
-      voted: this.phase === 'vote' && this.hasVoted(p.id),
+      voted: this.phase === 'pick' && this.questionVotes.has(p.id),
+      rated: this.ratings.has(p.id),
     };
   }
 
   publicState() {
-    const g = this.grill[this.grillIndex];
-    const grilling = ['question', 'answer', 'hearing'].includes(this.phase) && g;
-    const showTranscript = ['vote', 'results', 'final'].includes(this.phase);
+    const showQuestions = this.phase === 'pick';
+    const showChosen = ['question', 'answer', 'hearing', 'rate', 'results', 'final'].includes(this.phase);
+    const showAnswer = ['hearing', 'rate', 'results', 'final'].includes(this.phase);
     return {
       roomCode: this.code,
       phase: this.phase,
@@ -244,18 +228,12 @@ class Room {
       totalRounds: this.totalRounds,
       players: [...this.players.values()].map((p) => this.publicPlayer(p)),
       politicianId: this.politicianId,
-      talkingPoints: this.hand,
-      grill: grilling
-        ? {
-            index: this.grillIndex,
-            total: this.grill.length,
-            journalistId: g.journalistId,
-            question: g.question,
-            answer: this.phase === 'hearing' ? g.answer : null,
-            talkingPoint: this.phase === 'hearing' ? g.talkingPoint : null,
-          }
+      headline: this.headline ? this.headline.text : null,
+      // While picking, questions don't say who wrote them.
+      questions: showQuestions ? [...this.asks.entries()].map(([id, text]) => ({ id, text })) : [],
+      chosen: showChosen && this.chosen
+        ? { journalistId: this.chosen.journalistId, question: this.chosen.question, answer: showAnswer ? this.chosen.answer : null }
         : null,
-      transcript: showTranscript ? this.grill.map(({ journalistId, question, answer, talkingPoint }) => ({ journalistId, question, answer, talkingPoint })) : [],
       results: this.results,
     };
   }
@@ -272,7 +250,7 @@ class Room {
       player: p ? this.publicPlayer(p) : null,
       role,
       question: this.asks.get(playerId) || null,
-      votes: { question: this.questionVotes.get(playerId) || null, dodge: this.ratings.get(playerId) || null },
+      votes: { question: this.questionVotes.get(playerId) || null, stars: this.ratings.get(playerId) || null },
     };
   }
 
@@ -309,10 +287,17 @@ class Room {
     return this.activePlayers().filter((p) => p.id !== this.politicianId);
   }
 
-  // Ends asking or voting early once everyone still playing is done.
+  // Journalists who can vote in the pick: anyone with a question to choose that isn't their own.
+  canPick(id) {
+    return [...this.asks.keys()].some((qid) => qid !== id);
+  }
+
+  // Ends a phase early once everyone still playing is done.
   checkAllIn() {
-    if (this.phase === 'ask' && this.activeJournalists().every((p) => this.asks.has(p.id))) this.closeAsks();
-    else if (this.phase === 'vote' && this.activePlayers().every((p) => this.hasVoted(p.id))) this.finishVote();
+    const journalists = this.activeJournalists();
+    if (this.phase === 'ask' && journalists.every((p) => this.asks.has(p.id))) this.closeAsks();
+    else if (this.phase === 'pick' && journalists.every((p) => this.questionVotes.has(p.id) || !this.canPick(p.id))) this.closePick();
+    else if (this.phase === 'rate' && journalists.every((p) => this.ratings.has(p.id))) this.finishRound();
   }
 
   // ---- phases ----
@@ -335,34 +320,35 @@ class Room {
     return this.order[(this.round - 1) % this.order.length] || [...this.players.keys()][0];
   }
 
-  dealHand() {
-    const size = Math.max(MIN_HAND, Math.min(MAX_HAND, this.activeJournalists().length));
-    const hand = [];
-    while (hand.length < size) {
-      if (!this.pointsLeft.length) this.pointsLeft = shuffle(content.talkingPoints);
-      const text = this.pointsLeft.pop();
-      if (!hand.some((c) => c.text === text)) hand.push({ text, used: false });
-    }
-    return hand;
+  // Questions written for this round's headline first, then general ones.
+  backupQuestion() {
+    if (!this.backupLeft.length) this.backupLeft = shuffle(content.questions.map((q) => q.text));
+    return this.headlineQuestions.pop() || this.backupLeft.pop();
   }
 
-  backupQuestion() {
-    if (!this.backupLeft.length) this.backupLeft = shuffle(content.questions);
-    return this.backupLeft.pop().text;
+  nextHeadline() {
+    if (!this.headlinesLeft.length) this.headlinesLeft = shuffle(content.headlines);
+    return this.headlinesLeft.pop();
   }
 
   nextRound() {
     this.round++;
     this.politicianId = this.pickPolitician();
-    this.hand = this.dealHand();
+    // "{name}" in a headline becomes the politician's character name.
+    const h = this.nextHeadline();
+    const character = characterInfo(this.players.get(this.politicianId)?.characterId);
+    this.headline = { text: h.text.replace(/\{name\}/g, character?.name || 'Politician'), questions: h.questions || [] };
+    this.headlineQuestions = shuffle(this.headline.questions);
     this.asks.clear();
-    this.grill = [];
-    this.grillIndex = -1;
     this.questionVotes.clear();
     this.ratings.clear();
+    this.chosen = null;
+    this.pickTally = null;
     this.results = null;
     this.setPhase('ask', { timerMs: ASK_MS, visible: true, onTimeout: () => this.closeAsks() });
     this.sendYouAll();
+    const text = this.headline.text;
+    this.emit('headline:read', { round: this.round, text, audioUrl: speak(`Breaking news. ${text}.`, voiceIdFor('anchor')) });
   }
 
   submitQuestion(playerId, text) {
@@ -378,94 +364,20 @@ class Room {
   }
 
   closeAsks() {
-    // Every journalist still here gets a question in, even if they didn't write one.
-    const active = this.activeJournalists();
-    const journalists = [...this.players.values()].filter((p) => p.id !== this.politicianId && (active.includes(p) || this.asks.has(p.id)));
-    this.grill = shuffle(journalists).map((p) => {
-      const question = this.asks.get(p.id) || this.backupQuestion();
-      // Start every question now, so the audio is ready by the time its turn comes.
-      return { journalistId: p.id, question, questionAudio: speak(question, pressOf(p).voiceId || DEFAULT_VOICE_ID), answer: null, talkingPoint: null };
-    });
-    this.askQuestion(0);
-  }
-
-  askQuestion(index) {
-    if (index >= this.grill.length) return this.startVote();
-    this.grillIndex = index;
-    const g = this.grill[index];
-    const p = this.players.get(g.journalistId);
-    this.setPhase('question', { timerMs: speakingMs(g.question, MAX_QUESTION_MS), onTimeout: () => this.startAnswer() });
-    this.emit('question:ask', {
-      round: this.round,
-      index,
-      total: this.grill.length,
-      text: g.question,
-      journalist: { playerId: g.journalistId, name: p?.name || '', outlet: p ? pressOf(p).outlet : '' },
-      audioUrl: g.questionAudio,
-    });
-  }
-
-  startAnswer() {
-    this.setPhase('answer', { timerMs: ANSWER_MS, visible: true, onTimeout: () => this.closeAnswer() });
-  }
-
-  // Unused talking points, or all of them once they've all been used.
-  playableCards() {
-    const fresh = this.hand.filter((c) => !c.used);
-    return fresh.length ? fresh : this.hand;
-  }
-
-  submitAnswer(playerId, text) {
-    if (this.phase !== 'answer') return { error: 'Not answering right now' };
-    if (playerId !== this.politicianId) return { error: "You're not at the podium" };
-    text = cleanText(text, MAX_ANSWER);
-    if (!text) return { error: 'Empty answer' };
-    const card = this.playableCards().find((c) => mentions(text, c.text));
-    if (!card) return { error: 'Work in one of your talking points (tap a card)' };
-    this.closeAnswer(text, card);
-    return { ok: true };
-  }
-
-  // Without an answer (time ran out), the politician falls back on a talking point.
-  closeAnswer(text = null, card = null) {
-    const g = this.grill[this.grillIndex];
-    if (!card) card = pick(this.playableCards());
-    if (!text) text = `${card.text}. ${pick(content.stockAnswers)}`;
-    card.used = true;
-    g.answer = text;
-    g.talkingPoint = card.text;
-
-    const p = this.players.get(this.politicianId);
-    const character = p && content.politicians.find((c) => c.id === p.characterId);
-    const speech = addDelivery(text);
-    const audioUrl = speak(speech, (character && character.voiceId) || DEFAULT_VOICE_ID);
-    // Screens get the text without tags; only the voice hears them.
-    g.answer = stripTags(text) || text;
-    const index = this.grillIndex;
-    this.setPhase('hearing', { timerMs: speakingMs(g.answer, MAX_LINE_MS) + 2000, onTimeout: () => this.askQuestion(index + 1) });
-    console.log(`[${this.code}]   says: ${speech}`);
-    this.emit('hearing:line', {
-      round: this.round,
-      index,
-      total: this.grill.length,
-      playerId: this.politicianId,
-      character: p ? characterInfo(p.characterId) : null,
-      text: g.answer,
-      talkingPoint: g.talkingPoint,
-      audioUrl,
-    });
-  }
-
-  startVote() {
-    if (!this.grill.length) return this.finishVote(); // nobody asked anything
-    this.setPhase('vote', { timerMs: VOTE_MS, visible: true, onTimeout: () => this.finishVote() });
+    // Journalists still here who didn't write one get a backup question, so there's always a choice.
+    for (const p of this.activeJournalists()) if (!this.asks.has(p.id)) this.asks.set(p.id, this.backupQuestion());
+    if (!this.asks.size) this.asks.set(null, this.backupQuestion()); // nobody left to ask
+    // Nothing to vote on with a single question.
+    if (this.asks.size < 2) return this.closePick();
+    this.setPhase('pick', { timerMs: PICK_MS, visible: true, onTimeout: () => this.closePick() });
     this.sendYouAll();
   }
 
   voteQuestion(voterId, targetId) {
-    if (this.phase !== 'vote') return { error: 'Voting is closed' };
+    if (this.phase !== 'pick') return { error: 'Voting is closed' };
+    if (voterId === this.politicianId) return { error: 'The press picks the question' };
     if (targetId === voterId) return { error: "You can't vote for your own question" };
-    if (!this.grill.some((g) => g.journalistId === targetId)) return { error: 'Unknown question' };
+    if (!this.asks.has(targetId)) return { error: 'Unknown question' };
     this.questionVotes.set(voterId, targetId);
     this.sendYou(voterId);
     this.broadcast();
@@ -473,8 +385,71 @@ class Room {
     return { ok: true };
   }
 
-  rateDodge(voterId, stars) {
-    if (this.phase !== 'vote') return { error: 'Voting is closed' };
+  // The question with the most votes gets asked; ties are settled at random.
+  closePick() {
+    const tally = new Map([...this.asks.keys()].map((id) => [id, 0]));
+    for (const target of this.questionVotes.values()) tally.set(target, tally.get(target) + 1);
+    const top = Math.max(...tally.values());
+    const journalistId = pick([...tally.keys()].filter((id) => tally.get(id) === top));
+    this.pickTally = Object.fromEntries([...tally].filter(([id]) => id));
+    this.chosen = { journalistId, question: this.asks.get(journalistId), answer: null };
+    this.askQuestion();
+  }
+
+  askQuestion() {
+    const p = this.players.get(this.chosen.journalistId);
+    const question = this.chosen.question;
+    const round = this.round;
+    this.setPhase('question', { timerMs: speakingMs(question, MAX_QUESTION_MS), onTimeout: () => this.startAnswer() });
+    this.emit('question:ask', {
+      round,
+      text: question,
+      journalist: { playerId: p?.id || null, name: p?.name || 'The press', outlet: p ? pressOf(p).outlet : '' },
+      audioUrl: speak(question, (p && pressOf(p).voiceId) || DEFAULT_VOICE_ID),
+    });
+  }
+
+  startAnswer() {
+    this.setPhase('answer', { timerMs: ANSWER_MS, visible: true, onTimeout: () => this.closeAnswer() });
+  }
+
+  submitAnswer(playerId, text) {
+    if (this.phase !== 'answer') return { error: 'Not answering right now' };
+    if (playerId !== this.politicianId) return { error: "You're not at the podium" };
+    text = cleanText(text, MAX_ANSWER);
+    if (!text) return { error: 'Empty answer' };
+    this.closeAnswer(text);
+    return { ok: true };
+  }
+
+  // If time runs out, a stock dodge is said for them.
+  closeAnswer(text = pick(content.stockAnswers)) {
+    const p = this.players.get(this.politicianId);
+    const character = p && content.politicians.find((c) => c.id === p.characterId);
+    const speech = addDelivery(text);
+    const audioUrl = speak(speech, (character && character.voiceId) || DEFAULT_VOICE_ID);
+    // Screens get the text without tags; only the voice hears them.
+    this.chosen.answer = stripTags(text) || text;
+    const round = this.round;
+    this.setPhase('hearing', { timerMs: speakingMs(this.chosen.answer, MAX_LINE_MS) + 2000, onTimeout: () => this.startRating() });
+    console.log(`[${this.code}]   says: ${speech}`);
+    this.emit('hearing:line', {
+      round,
+      playerId: this.politicianId,
+      character: p ? characterInfo(p.characterId) : null,
+      text: this.chosen.answer,
+      audioUrl,
+    });
+  }
+
+  startRating() {
+    if (!this.activeJournalists().length) return this.finishRound(); // nobody to rate
+    this.setPhase('rate', { timerMs: RATE_MS, visible: true, onTimeout: () => this.finishRound() });
+    this.sendYouAll();
+  }
+
+  rateAnswer(voterId, stars) {
+    if (this.phase !== 'rate') return { error: 'Rating is closed' };
     if (voterId === this.politicianId) return { error: "You can't rate yourself" };
     stars = Math.round(Number(stars));
     if (!(stars >= 1 && stars <= 5)) return { error: 'Rate 1 to 5 stars' };
@@ -485,11 +460,10 @@ class Room {
     return { ok: true };
   }
 
-  finishVote() {
-    const questionVotes = {};
-    for (const target of this.questionVotes.values()) questionVotes[target] = (questionVotes[target] || 0) + 1;
+  finishRound() {
     const points = {};
-    for (const [id, n] of Object.entries(questionVotes)) points[id] = n * POINTS_PER_VOTE;
+    const author = this.chosen?.journalistId;
+    if (author && this.players.has(author)) points[author] = BEST_QUESTION_POINTS;
 
     const stars = [...this.ratings.values()];
     const average = stars.length ? stars.reduce((a, b) => a + b, 0) / stars.length : 0;
@@ -499,9 +473,12 @@ class Room {
       const p = this.players.get(id);
       if (p) p.score += n;
     }
-    const top = Math.max(0, ...Object.values(questionVotes));
-    const bestQuestion = top > 0 ? Object.keys(questionVotes).filter((id) => questionVotes[id] === top) : [];
-    this.results = { questionVotes, bestQuestion, dodge: { average: Math.round(average * 10) / 10, count: stars.length }, points };
+    this.results = {
+      bestQuestion: author || null,
+      questionVotes: this.pickTally || {},
+      rating: { average: Math.round(average * 10) / 10, count: stars.length },
+      points,
+    };
 
     if (this.round >= this.totalRounds) this.setPhase('final');
     else this.setPhase('results', { timerMs: RESULTS_MS, visible: true, onTimeout: () => this.nextRound() });
@@ -518,7 +495,7 @@ class Room {
   reset() {
     clearTimeout(this.timer);
     for (const p of this.players.values()) p.score = 0;
-    Object.assign(this, { round: 0, totalRounds: 0, politicianId: null, hand: [], grill: [], grillIndex: -1, results: null, endsAt: null, timer: null });
+    Object.assign(this, { round: 0, totalRounds: 0, politicianId: null, headline: null, chosen: null, results: null, endsAt: null, timer: null });
     this.asks.clear();
     this.questionVotes.clear();
     this.ratings.clear();
@@ -591,29 +568,26 @@ class Room {
     return { ok: true };
   }
 
-  // Bots ask, dodge and vote a few seconds into each phase, like slow humans.
+  // Bots ask, vote, answer and rate a few seconds into each phase, like slow humans.
   runBots() {
     const round = this.round;
-    const index = this.grillIndex;
     const still = (phase) => this.phase === phase && this.round === round;
     for (const bot of [...this.players.values()].filter((p) => p.bot)) {
-      if (this.phase === 'ask' && bot.id !== this.politicianId) {
+      const atPodium = bot.id === this.politicianId;
+      if (this.phase === 'ask' && !atPodium) {
         setTimeout(() => still('ask') && this.submitQuestion(bot.id, this.backupQuestion()), randomMs(3000, 10000));
       }
-      if (this.phase === 'answer' && bot.id === this.politicianId) {
+      if (this.phase === 'pick' && !atPodium) {
         setTimeout(() => {
-          if (!still('answer') || this.grillIndex !== index) return;
-          const card = pick(this.playableCards());
-          this.submitAnswer(bot.id, pick(content.botDodges).replace('{point}', card.text));
-        }, randomMs(3000, 8000));
+          const others = [...this.asks.keys()].filter((id) => id !== bot.id);
+          if (still('pick') && others.length) this.voteQuestion(bot.id, pick(others));
+        }, randomMs(2000, 7000));
       }
-      if (this.phase === 'vote') {
-        setTimeout(() => {
-          if (!still('vote')) return;
-          const others = this.grill.filter((g) => g.journalistId !== bot.id);
-          if (others.length) this.voteQuestion(bot.id, pick(others).journalistId);
-          if (bot.id !== this.politicianId) this.rateDodge(bot.id, 2 + Math.floor(Math.random() * 4));
-        }, randomMs(2000, 8000));
+      if (this.phase === 'answer' && atPodium) {
+        setTimeout(() => still('answer') && this.submitAnswer(bot.id, pick(content.botAnswers)), randomMs(3000, 8000));
+      }
+      if (this.phase === 'rate' && !atPodium) {
+        setTimeout(() => still('rate') && this.rateAnswer(bot.id, 2 + Math.floor(Math.random() * 4)), randomMs(2000, 6000));
       }
     }
   }
@@ -707,9 +681,9 @@ io.on('connection', (socket) => {
   };
   playerAction('player:look', (r, id, { look }) => r.setLook(id, look));
   playerAction('question:submit', (r, id, { text }) => r.submitQuestion(id, text));
-  playerAction('answer:submit', (r, id, { text }) => r.submitAnswer(id, text));
   playerAction('vote:question', (r, id, { targetId }) => r.voteQuestion(id, targetId));
-  playerAction('vote:dodge', (r, id, { stars }) => r.rateDodge(id, stars));
+  playerAction('answer:submit', (r, id, { text }) => r.submitAnswer(id, text));
+  playerAction('answer:rate', (r, id, { stars }) => r.rateAnswer(id, stars));
 
   // TV only from here on.
   const tvRoom = () => (socket.data.tv ? room() : null);
@@ -736,14 +710,14 @@ io.on('connection', (socket) => {
     ack(r ? r.removeBot(playerId) : { error: 'Not a TV' });
   });
 
-  socket.on('question:done', ({ round, index } = {}) => {
+  socket.on('question:done', ({ round } = {}) => {
     const r = tvRoom();
-    if (r && r.phase === 'question' && round === r.round && index === r.grillIndex) r.startAnswer();
+    if (r && r.phase === 'question' && round === r.round) r.startAnswer();
   });
 
-  socket.on('hearing:done', ({ round, index } = {}) => {
+  socket.on('hearing:done', ({ round } = {}) => {
     const r = tvRoom();
-    if (r && r.phase === 'hearing' && round === r.round && index === r.grillIndex) r.askQuestion(index + 1);
+    if (r && r.phase === 'hearing' && round === r.round) r.startRating();
   });
 
   // Dev: skip the rest of the current phase. In the lobby, start with any number of players.

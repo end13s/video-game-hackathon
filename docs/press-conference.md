@@ -2,11 +2,11 @@
 
 ## Concept
 
-One player is the politician at the podium. The others are journalists and type questions on their phones. The politician has to answer every question using a random hand of 3–4 talking points, like "family values", "the previous government" or "infrastructure". The TV reads each question in a journalist voice and each answer in the politician's voice. The room votes on the toughest question and rates the dodge. The podium rotates every round.
+Every round opens with a breaking-news headline about one player's politician, who takes the podium. The others are journalists: they each write a question about the headline on their phone, then vote for the best one (funniest, toughest, whatever they like). The TV reads the winning question in a journalist voice, the politician types an answer, and the TV plays it in the politician's voice. The journalists rate the answer 1–5 stars. Everyone takes the podium once, then the game is over.
 
-Before the game, everyone builds their politician's look on their phone (skin, hair, suit, face, expression). The TV draws that character in the lobby, at the podium and on the scoreboard.
+Before the game, everyone builds their politician's look on their phone (skin, hair, suit, face, expression). The TV draws that character in the press room: at the podium when it's their turn, and on the floor as a reporter when it isn't.
 
-Theme: decides who the politicians are, what the talking points are, and the look of the room. Elijah writes the characters, outlets, talking points and backup questions in `content.js`.
+Theme: decides who the politicians are, the headlines, and the look of the room. Elijah writes the characters, outlets, headlines and backup questions in `content.js`.
 
 ## Round loop
 
@@ -15,17 +15,16 @@ Each player takes the podium once (set `ROUNDS` in `.env` to play fewer, e.g. 1 
 | Phase | Length | What happens |
 |---|---|---|
 | `lobby` | until Start | Players scan the QR code, join and build their politician's look. The TV can add bots |
-| `ask` | 40 s, or until every journalist has asked | The next player takes the podium and gets 3–4 talking points (shown on the TV and on every phone). Journalists type one question each. Blank ones get a backup question from `content.js` |
-| `question` | until the TV finishes playing it (max 20 s) | The TV reads one journalist's question. Repeats for every question |
-| `answer` | 40 s, or until the politician answers | The politician types an answer that must contain an unused talking point (tapping a card inserts it). If time runs out, a talking point plus a stock line is said for them |
-| `hearing` | until the TV finishes playing it | The TV plays the answer in the politician's voice, with the talking point highlighted in the subtitle. Then the next `question`, or `vote` after the last one |
-| `vote` | 25 s, or until everyone has voted | Everyone picks the toughest question (not their own). Journalists also rate the dodge 1–5 stars |
+| `ask` | 40 s, or until every journalist has asked | The next player takes the podium. The anchor reads the round's headline; the TV and phones show it. Journalists type one question each about it. Blank ones get a backup question written for that headline |
+| `pick` | 20 s, or until every journalist has voted | Journalists vote for the best question, not their own. Questions are anonymous. Skipped if there's only one question |
+| `question` | until the TV finishes playing it (max 20 s) | The TV reads the winning question. Most votes wins; ties are settled at random |
+| `answer` | 45 s, or until the politician answers | The politician types an answer. If time runs out, a stock line is said for them |
+| `hearing` | until the TV finishes playing it | The TV plays the answer in the politician's voice, with subtitles |
+| `rate` | 20 s, or until every journalist has rated | Journalists rate the answer 1–5 stars. Ratings are averaged |
 | `results` | 10 s | Points for the round. Then the next player takes the podium |
 | `final` | until the host restarts | After the last round: final scores and the winner |
 
-Scoring: journalists get 100 points per vote for their question. The politician gets the average dodge rating × 100 (5 stars = 500).
-
-Talking points: each can be used once. If there are more questions than cards, used cards come back once all are used. Matching ignores case and punctuation.
+Scoring: the journalist whose question was picked gets 200 points. The politician gets the average rating × 100 (5 stars = 500).
 
 ## Message list
 
@@ -33,7 +32,7 @@ Naming: `subject:action`. The server knows who sent a message from the socket, s
 
 **Rooms:** every TV page gets its own room with a 4-letter code, so several groups (or judges) can play at once. The TV shows a QR code for `/?room=CODE`; the phone reads `room` from its URL. Everything below happens inside one room.
 
-**Bots:** the TV can add bots (`bot:add`) so one person can play alone. Bots live in the server: they ask, dodge and vote by themselves and show up in `players` with `bot: true`. Lines for them are in `content.js`.
+**Bots:** the TV can add bots (`bot:add`) so one person can play alone. Bots live in the server: they ask, vote, answer and rate by themselves and show up in `players` with `bot: true`. Lines for them are in `content.js`.
 
 **The main idea:** the server broadcasts `game:state` with everything public after every change. Screens just redraw from the latest `game:state`. A few extra messages carry things that happen once (play this audio) or are private (your own question and votes).
 
@@ -44,9 +43,9 @@ Naming: `subject:action`. The server knows who sent a message from the socket, s
 | `player:join` | `{ roomCode, playerId, name }` | `{ roomCode, you }` or `{ error }` | Tap to join, and after every reconnect. `roomCode` from the page URL |
 | `player:look` | `{ look: { skin, hair, hairColor, suit, extra, mouth } }` (option indexes, see `public/avatar.js`) | `{ ok: true }` or `{ error }` | In the lobby, whenever the player changes their look |
 | `question:submit` | `{ text }` (max 160 chars) | `{ ok: true }` or `{ error }` | Journalists, during `ask`. Sending again replaces the question |
-| `answer:submit` | `{ text }` (max 200 chars) | `{ ok: true }` or `{ error }` | Politician, during `answer`. Rejected if it doesn't contain a playable talking point |
-| `vote:question` | `{ targetId }` (the journalist's player id) | `{ ok: true }` or `{ error }` | During `vote`. Sending again changes the vote. Can't vote for your own question |
-| `vote:dodge` | `{ stars }` (1–5) | `{ ok: true }` or `{ error }` | Journalists, during `vote`. Sending again changes the rating |
+| `vote:question` | `{ targetId }` (a question `id` from `game:state`) | `{ ok: true }` or `{ error }` | Journalists, during `pick`. Sending again changes the vote. Can't vote for your own |
+| `answer:submit` | `{ text }` (max 200 chars) | `{ ok: true }` or `{ error }` | Politician, during `answer` |
+| `answer:rate` | `{ stars }` (1–5) | `{ ok: true }` or `{ error }` | Journalists, during `rate`. Sending again changes the rating |
 
 ### TV → server
 
@@ -58,8 +57,8 @@ All of these only work from a socket that sent `tv:join`.
 | `bot:add` | none | `{ ok, playerId }` or `{ error }` | "Add bot" button in the lobby |
 | `bot:remove` | `{ playerId }` | `{ ok }` or `{ error }` | Remove a bot (lobby only) |
 | `game:start` | none | `{ ok }` or `{ error }` | Start button in the lobby (needs 2+ players) |
-| `question:done` | `{ round, index }` | none | The question audio finished playing |
-| `hearing:done` | `{ round, index }` | none | The answer audio finished playing |
+| `question:done` | `{ round }` | none | The question audio finished playing |
+| `hearing:done` | `{ round }` | none | The answer audio finished playing |
 | `phase:next` | none | none | Dev button: skip the rest of the current phase (in the lobby it starts the game with any number of players) |
 | `game:reset` | none | none | Dev button / "Play again": back to the lobby, scores to 0, players stay |
 
@@ -70,21 +69,22 @@ If the TV never sends `question:done` or `hearing:done` (no audio, page closed),
 | Message | Payload | When |
 |---|---|---|
 | `game:state` | see below | After every change |
-| `question:ask` | `{ round, index, total, text, journalist: { playerId, name, outlet }, audioUrl }` | Start of each `question`. The TV plays `audioUrl` (may be `null`: show the text only) |
-| `hearing:line` | `{ round, index, total, playerId, character: { id, name, title }, text, talkingPoint, audioUrl }` | Start of each `hearing`. The TV plays `audioUrl` and shows `text` as a subtitle |
+| `headline:read` | `{ round, text, audioUrl }` | Start of `ask`. The TV plays the anchor reading the headline (`audioUrl` may be `null`) |
+| `question:ask` | `{ round, text, journalist: { playerId, name, outlet }, audioUrl }` | Start of `question`. The TV plays `audioUrl` (may be `null`: show the text only) |
+| `hearing:line` | `{ round, playerId, character: { id, name, title }, text, audioUrl }` | Start of `hearing`. The TV plays `audioUrl` and shows `text` as a subtitle |
 
 ### Server → one phone
 
 | Message | Payload | When |
 |---|---|---|
-| `you` | `{ player, role, question, votes: { question, dodge } }`: your player, `'politician'` or `'journalist'` this round (`null` in the lobby), your question this round, your votes | After joining, after your own look, question or vote, and at the start of each round |
+| `you` | `{ player, role, question, votes: { question, stars } }`: your player, `'politician'` or `'journalist'` this round (`null` in the lobby), your question this round, the question you voted for and your rating | After joining, after your own look, question, vote or rating, and at the start of each phase where you act |
 
 ### `game:state`
 
 ```js
 {
   roomCode: 'ABCD',
-  phase: 'lobby' | 'ask' | 'question' | 'answer' | 'hearing' | 'vote' | 'results' | 'final',
+  phase: 'lobby' | 'ask' | 'pick' | 'question' | 'answer' | 'hearing' | 'rate' | 'results' | 'final',
   remainingMs: 31000,        // time left in this phase, null if it has no timer. Start your countdown when the message arrives
   round: 1,                  // 0 in the lobby
   totalRounds: 4,
@@ -93,17 +93,18 @@ If the TV never sends `question:done` or `hearing:done` (no audio, page closed),
     character: { id, name, title },   // their politician
     look: { skin, hair, hairColor, suit, extra, mouth },
     outlet,                  // their outlet when they're a journalist
-    asked: true,             // this round (during ask)
-    voted: false,            // all their votes are in (during vote)
+    asked: true,             // wrote a question this round
+    voted: false,            // voted in pick
+    rated: false,            // rated the answer
   }],
   politicianId,              // who's at the podium, null in the lobby
-  talkingPoints: [{ text, used }],
-  grill: { index, total, journalistId, question, answer, talkingPoint },  // during question, answer, hearing; answer and talkingPoint only in hearing
-  transcript: [{ journalistId, question, answer, talkingPoint }],         // only in vote, results and final, otherwise []
+  headline: '...',           // this round's headline, null in the lobby
+  questions: [{ id, text }], // only in pick, otherwise []. id is the author's player id; screens don't show it
+  chosen: { journalistId, question, answer },   // from question on; answer from hearing on
   results: {                 // results and final, otherwise null
+    bestQuestion: playerId,  // whose question was picked
     questionVotes: { [playerId]: 2 },
-    bestQuestion: [playerId],
-    dodge: { average: 3.7, count: 3 },
+    rating: { average: 3.7, count: 3 },
     points: { [playerId]: 200 },
   },
 }
