@@ -28,7 +28,10 @@
         <h1 class="title">Press<br>Conference</h1>
         <p class="sub">Answer the journalists. Your politician says it out loud. Best dodge wins.</p>
         <ul id="lobby-players" class="player-list"></ul>
-        <button id="start" class="big-btn" disabled>Start (Enter)</button>
+        <div class="lobby-buttons">
+          <button id="start" class="big-btn" disabled>Start (Enter)</button>
+          <button id="add-bot" class="big-btn ghost-btn">Add bot (B)</button>
+        </div>
         <p id="start-error" class="lobby-error"></p>
       </div>
     </section>
@@ -77,7 +80,7 @@
   </main>
 
   <footer id="ticker"><div class="ticker-track"><span id="ticker-text"></span></div></footer>
-  <div id="dev">Enter start · N skip phase · R reset</div>
+  <div id="dev">Enter start · B add bot · N skip phase · R reset</div>
   <div id="offline" class="hidden">Reconnecting to the server…</div>
 
   <script src="/socket.io/socket.io.js"></script>

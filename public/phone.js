@@ -18,6 +18,7 @@ if (!playerId) {
   storageSet('pcPlayerId', playerId);
 }
 $('name').value = storageGet('pcName') || '';
+const roomCode = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
 
 let state = null;
 let you = null; // { player, answer, vote }
@@ -37,7 +38,11 @@ function join() {
   const name = $('name').value.trim();
   if (!name) return $('name').focus();
   storageSet('pcName', name);
-  socket.emit('player:join', { playerId, name }, (res) => {
+  if (!roomCode) {
+    $('join-error').textContent = 'Scan the QR code on the TV to join.';
+    return show('join');
+  }
+  socket.emit('player:join', { roomCode, playerId, name }, (res) => {
     if (res.error) {
       $('join-error').textContent = res.error;
       return show('join');

@@ -146,3 +146,6 @@ body[data-phase="final"] [data-screen="results"] { display: flex; animation: ent
 .warn { margin: 0; color: var(--gold); font-size: 1.2rem; max-width: 26rem; text-align: center; }
 .lobby-error { margin: 0; min-height: 1.4em; color: var(--gold); font-size: 1.4rem; font-weight: 700; }
 .round-tag { margin: 0; font-size: 1.6rem; font-weight: 800; color: var(--gold); text-transform: uppercase; letter-spacing: .1em; }
+.lobby-buttons { display: flex; gap: 1rem; }
+.lobby-buttons .big-btn { flex: 1; }
+.ghost-btn { background: none; border: .2rem solid var(--muted); }

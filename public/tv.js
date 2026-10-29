@@ -3,6 +3,8 @@
 const $ = (id) => document.getElementById(id);
 const socket = io();
 
+const params = new URLSearchParams(location.search);
+let roomCode = params.get('room');
 let state = { phase: 'lobby', players: [], round: 0 };
 let endsAt = null; // local time the current phase ends, from remainingMs
 
@@ -23,7 +25,15 @@ function setAll(selector, text) {
 
 socket.on('connect', () => {
   $('offline').classList.add('hidden');
-  socket.emit('tv:join', (res) => render(res.state));
+  // Keeps the room code in the URL so a refresh rejoins the same room.
+  socket.emit('tv:join', { roomCode }, (res) => {
+    if (res.error) return ($('start-error').textContent = res.error);
+    roomCode = res.roomCode;
+    params.set('room', roomCode);
+    history.replaceState(null, '', `?${params}`);
+    showJoinQr();
+    render(res.state);
+  });
 });
 socket.on('disconnect', () => $('offline').classList.remove('hidden'));
 socket.on('game:state', render);
@@ -32,15 +42,22 @@ socket.on('hearing:line', onHearingLine);
 
 // ---- join QR ---------------------------------------------------------------
 
+let publicUrl = '';
 fetch('/config')
   .then((r) => r.json())
   .then((config) => {
-    const joinUrl = `${(config.publicUrl || location.origin).replace(/\/$/, '')}/`;
-    $('qr').innerHTML = `<img src="/qr.svg?text=${encodeURIComponent(joinUrl)}" alt="QR code to join" style="width:100%;height:100%">`;
-    $('join-url').textContent = joinUrl;
-    $('url-warning').classList.toggle('hidden', !/localhost|127\.0\.0\.1/.test(joinUrl));
+    publicUrl = config.publicUrl;
+    showJoinQr();
   })
   .catch(() => ($('join-url').textContent = 'Could not load /config'));
+
+function showJoinQr() {
+  if (!roomCode) return;
+  const joinUrl = `${(publicUrl || location.origin).replace(/\/$/, '')}/?room=${roomCode}`;
+  $('qr').innerHTML = `<img src="/qr.svg?text=${encodeURIComponent(joinUrl)}" alt="QR code to join" style="width:100%;height:100%">`;
+  $('join-url').textContent = joinUrl;
+  $('url-warning').classList.toggle('hidden', !/localhost|127\.0\.0\.1/.test(joinUrl));
+}
 
 // ---- render ----------------------------------------------------------------
 
@@ -210,9 +227,11 @@ function start() {
 }
 $('start').onclick = start;
 $('again').onclick = start;
+$('add-bot').onclick = () => socket.emit('bot:add', (res) => ($('start-error').textContent = res?.error || ''));
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') start();
+  if ((e.key === 'b' || e.key === 'B') && state.phase === 'lobby') $('add-bot').click();
   if (e.key === 'n' || e.key === 'N') socket.emit('phase:next');
   if (e.key === 'r' || e.key === 'R') socket.emit('game:reset');
 });
