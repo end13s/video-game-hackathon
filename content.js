@@ -1,4 +1,4 @@
-// Game content. Placeholder data: replace with theme content.
+// Game content. Names, voices and outlets are placeholders: replace with theme content.
 // voiceId: copy from the ElevenLabs web app (My Voices > ... > Copy voice ID).
 // An empty voiceId falls back to ELEVENLABS_TEST_VOICE_ID from .env.
 
@@ -18,21 +18,43 @@ module.exports = {
     { id: 'p6', name: 'Spokesperson Six', title: 'Press Secretary', voiceId: '' },
   ],
 
+  // Each player also gets an outlet for the rounds they're a journalist. Their questions
+  // are read in that outlet's voice. Need at least 6.
   journalists: [
-    { id: 'j1', name: 'Reporter One', outlet: 'The Daily Placeholder', voiceId: '' },
-    { id: 'j2', name: 'Reporter Two', outlet: 'Channel 0 News', voiceId: '' },
+    { id: 'j1', name: 'Reporter One', outlet: 'The Daily Ledger', voiceId: '' },
+    { id: 'j2', name: 'Reporter Two', outlet: 'Channel 9 News', voiceId: '' },
+    { id: 'j3', name: 'Reporter Three', outlet: 'The Morning Post', voiceId: '' },
+    { id: 'j4', name: 'Reporter Four', outlet: 'Radio Free Town', voiceId: '' },
+    { id: 'j5', name: 'Reporter Five', outlet: 'The Gazette', voiceId: '' },
+    { id: 'j6', name: 'Reporter Six', outlet: 'Breaking Now', voiceId: '' },
   ],
 
-  // journalist: id from the list above (random if left out).
-  // audio: optional pre-made MP3 in public/audio/, played instead of live text-to-speech.
+  // The politician gets 3-4 of these per round and must work one into every answer.
+  talkingPoints: [
+    'family values', 'the previous government', 'infrastructure', 'hardworking families',
+    'job creators', 'our brave farmers', 'the economy', 'national security', 'common sense',
+    'the children', 'freedom', 'small businesses', 'bridges', 'fiscal responsibility',
+    'the middle class', 'tax relief', 'law and order', 'innovation', 'our great nation',
+    'the American dream', 'clean energy', 'border security', 'healthcare costs', 'transparency',
+    'moving forward', 'my grandmother', 'the free market', 'local communities', 'potholes',
+    'the fake news media',
+  ],
+
+  // Backup questions: used when a journalist doesn't write one in time, and by bots.
   questions: [
-    { text: 'Placeholder question one?', journalist: 'j1' },
-    { text: 'Placeholder question two?', journalist: 'j2' },
-    { text: 'Placeholder question three?' },
-    { text: 'Placeholder question four?' },
+    { text: 'Why was the city budget spent on a giant inflatable duck?' },
+    { text: 'Can you explain the photos of you at the casino during the flood?' },
+    { text: 'Is it true you have never seen a vegetable?' },
+    { text: 'Why did your campaign bus drive into a lake?' },
+    { text: 'Did you or did you not cancel Christmas?' },
+    { text: 'Why does your official portrait show a different person?' },
+    { text: 'What happened to the money for the new hospital?' },
+    { text: 'Why were you seen leaving the zoo with a penguin?' },
+    { text: 'Can you name a single thing you did this year?' },
+    { text: 'Why did you vote against your own bill?' },
   ],
 
-  // Used when a player doesn't answer in time.
+  // When the politician runs out of time, a talking point plus one of these is said for them.
   stockAnswers: ['No comment.', 'I will not dignify that with a response.', 'Next question.'],
 
   // Random delivery for answers read on stage: one tag at the start, sometimes a second
@@ -45,16 +67,16 @@ module.exports = {
   ],
   secondTagChance: 0.5,
 
-  // Bots fill the room when a judge plays alone. They pick one of these at random,
-  // so make them funny and general enough to fit any question. Audio tags work here.
+  // Bots fill the room when a judge plays alone. At the podium they pick one of these and
+  // put a talking point in place of {point}, so keep them general. Audio tags work here.
   botNames: ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'],
-  botAnswers: [
-    'Let me be absolutely clear: I have no idea what you are talking about.',
-    'That is a great question, and I will answer it right after the election.',
-    'I was not there. And if I was there, I was not paying attention.',
-    'My opponent would love for you to ask that. Next question!',
-    'I take full responsibility, and I blame my staff.',
-    '[sighs] Look. We all make mistakes. Mine were just bigger.',
-    'Absolutely not. Well, maybe. Probably yes.',
+  botDodges: [
+    'Let me be absolutely clear: this is about {point}.',
+    'That is a great question, and the answer is {point}.',
+    'I was not there. But I can tell you about {point}.',
+    'My opponent would love for you to ask that. I would rather talk about {point}.',
+    'I take full responsibility, and I blame {point}.',
+    '[sighs] Look. At the end of the day, it all comes down to {point}.',
+    'Absolutely not. Well, maybe. What really matters is {point}.',
   ],
 };

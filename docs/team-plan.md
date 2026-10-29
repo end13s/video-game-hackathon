@@ -1,6 +1,6 @@
 # Team plan for tonight
 
-Concept: **Press Conference** (players are politicians, journalists ask the questions, every answer is read aloud on the TV in the player's character voice).
+Concept: **Press Conference** (one player is the politician at the podium, the others are journalists who type questions; the politician dodges using a hand of talking points, the room votes on the toughest question and rates the dodge, and the podium rotates every round). Rules and message list: [press-conference.md](press-conference.md).
 
 | | Role | Owns |
 |---|---|---|

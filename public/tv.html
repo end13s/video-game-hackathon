@@ -13,6 +13,7 @@
 
   <header id="top">
     <div class="bug"><span class="live">● LIVE</span><span class="channel">PRESS CONFERENCE</span></div>
+    <p class="round-tag"></p>
     <div id="timer" class="hidden"><span id="timer-num">0</span></div>
   </header>
 
@@ -26,7 +27,7 @@
       </div>
       <div class="lobby-side">
         <h1 class="title">Press<br>Conference</h1>
-        <p class="sub">Answer the journalists. Your politician says it out loud. Best dodge wins.</p>
+        <p class="sub">One of you takes the podium. Everyone else grills them. Dodge with your talking points.</p>
         <ul id="lobby-players" class="player-list"></ul>
         <div class="lobby-buttons">
           <button id="start" class="big-btn" disabled>Start (Enter)</button>
@@ -36,29 +37,31 @@
       </div>
     </section>
 
-    <section data-screen="question">
-      <p class="round-tag"></p>
+    <section data-screen="ask">
+      <div class="ask-main">
+        <div class="podium-wrap"><div class="podium-figure"></div></div>
+        <div class="ask-side">
+          <p class="kicker">Now at the podium</p>
+          <h2 class="politician-title"></h2>
+          <p class="sub">Every answer must use one of these talking points:</p>
+          <div class="cards"></div>
+        </div>
+      </div>
+      <p class="status">Journalists, write your questions! <span class="counter-inline"><span id="asked">0</span> / <span id="ask-total">0</span></span></p>
+    </section>
+
+    <section data-screen="stage">
       <div class="card question-card">
-        <p class="from">Question from <strong class="journalist"></strong></p>
-        <p class="question-text"></p>
+        <p class="from"><span id="q-count"></span> <strong id="asker"></strong> asks</p>
+        <p class="question-text" id="question-text"></p>
       </div>
-    </section>
-
-    <section data-screen="answer">
-      <div class="card question-card small">
-        <p class="from"><strong class="journalist"></strong> asks</p>
-        <p class="question-text"></p>
+      <div class="stage-row">
+        <div class="podium-wrap"><div class="podium-figure"></div></div>
+        <div class="stage-side">
+          <p id="stage-status" class="status"></p>
+          <div class="cards"></div>
+        </div>
       </div>
-      <p class="status">The politicians are preparing their statements…</p>
-      <p class="counter"><span id="answered">0</span> / <span class="total">0</span> answers in</p>
-    </section>
-
-    <section data-screen="hearing">
-      <div class="card question-card small">
-        <p class="from"><strong class="journalist"></strong> asks</p>
-        <p class="question-text"></p>
-      </div>
-      <div id="podiums" class="podiums"></div>
       <div id="subtitle" class="lower-third hidden">
         <p id="sub-name" class="lt-name"></p>
         <p id="sub-text" class="lt-text"></p>
@@ -66,14 +69,15 @@
     </section>
 
     <section data-screen="vote">
-      <h2 class="heading">Vote for the best answer</h2>
-      <div id="vote-answers" class="answer-grid"></div>
+      <h2 class="heading">Vote on your phone</h2>
+      <p class="sub center">Pick the toughest question. Journalists, rate the dodge.</p>
+      <div id="transcript" class="transcript"></div>
       <p class="counter"><span id="voted">0</span> / <span class="total">0</span> votes in</p>
     </section>
 
     <section data-screen="results">
-      <p class="round-tag"></p>
-      <h2 class="heading" id="winner-line"></h2>
+      <h2 class="heading" id="results-heading"></h2>
+      <div id="highlights" class="highlights"></div>
       <ol id="scoreboard" class="scoreboard"></ol>
       <button id="again" class="big-btn hidden">Play again (Enter)</button>
     </section>
@@ -84,6 +88,7 @@
   <div id="offline" class="hidden">Reconnecting to the server…</div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="/avatar.js"></script>
   <script src="/tv.js"></script>
 </body>
 </html>

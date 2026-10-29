@@ -97,11 +97,11 @@
     socket.on('game:state', render);
     socket.on('question:ask', (q) => {
       log(`question:ask  ${q.journalist.name} (${q.journalist.outlet}): ${q.text}`);
-      play(q.audioUrl, `${q.journalist.name}: ${q.text}`, () => socket.emit('question:done', { round: q.round }));
+      play(q.audioUrl, `${q.journalist.name}: ${q.text}`, () => socket.emit('question:done', { round: q.round, index: q.index }));
     });
     socket.on('hearing:line', (l) => {
       log(`hearing:line ${l.index + 1}/${l.total}  ${l.character?.name}: ${l.text}`);
-      play(l.audioUrl, `${l.character?.name}: ${l.text}`, () => socket.emit('hearing:done', { index: l.index }));
+      play(l.audioUrl, `${l.character?.name}: ${l.text}`, () => socket.emit('hearing:done', { round: l.round, index: l.index }));
     });
   </script>
 </body>

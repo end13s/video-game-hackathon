@@ -5,7 +5,7 @@ const socket = io();
 
 const params = new URLSearchParams(location.search);
 let roomCode = params.get('room');
-let state = { phase: 'lobby', players: [], round: 0 };
+let state = { phase: 'lobby', players: [], round: 0, talkingPoints: [], transcript: [] };
 let endsAt = null; // local time the current phase ends, from remainingMs
 
 function esc(s) {
@@ -19,6 +19,16 @@ function charName(p) {
 }
 function setAll(selector, text) {
   for (const el of document.querySelectorAll(selector)) el.textContent = text;
+}
+function face(p, cls = '') {
+  return `<span class="face ${cls}" style="--c:${p?.color || '#999'}">${avatarSvg(p?.look, p?.color)}</span>`;
+}
+// Wraps the talking point in an answer in <mark>, so the TV shows how it was worked in.
+function highlight(text, point) {
+  const safe = esc(text);
+  if (!point) return safe;
+  const pattern = esc(point).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '[^a-z0-9]+');
+  return safe.replace(new RegExp(pattern, 'i'), (m) => `<mark>${m}</mark>`);
 }
 
 // ---- connection ------------------------------------------------------------
@@ -61,30 +71,35 @@ function showJoinQr() {
 
 // ---- render ----------------------------------------------------------------
 
+const SCREEN = { question: 'stage', answer: 'stage', hearing: 'stage', final: 'results' };
+
 function render(s) {
-  const prev = state.phase;
+  const prevPhase = state.phase;
+  const prevIndex = state.grill?.index;
   state = s;
   endsAt = s.remainingMs == null ? null : Date.now() + s.remainingMs;
   document.body.dataset.phase = s.phase;
-  const entered = s.phase !== prev;
+  document.body.dataset.screen = SCREEN[s.phase] || s.phase;
+  const entered = s.phase !== prevPhase;
 
-  const connected = s.players.filter((p) => p.connected);
-  setAll('.total', connected.length);
+  const politician = playerById(s.politicianId);
+  const journalists = s.players.filter((p) => p.id !== s.politicianId && p.connected);
   setAll('.round-tag', s.round ? `Round ${s.round} of ${s.totalRounds}` : '');
-  if (s.question) {
-    setAll('.journalist', `${s.question.journalist.name}, ${s.question.journalist.outlet}`);
-    setAll('.question-text', s.question.text);
-  }
+  setAll('.total', s.players.filter((p) => p.connected).length);
+  renderCards();
+  renderPodium(politician, s.phase === 'hearing');
 
   if (s.phase === 'lobby') renderLobby();
-  if (s.phase === 'answer') $('answered').textContent = s.players.filter((p) => p.answered).length;
-  if (s.phase === 'hearing') {
-    if (entered) $('subtitle').classList.add('hidden');
-    renderPodiums();
+  if (s.phase === 'ask') {
+    $('asked').textContent = journalists.filter((p) => p.asked).length;
+    $('ask-total').textContent = journalists.length;
+    setAll('.politician-title', `${politician?.name}, as ${charName(politician)}`);
+    if (entered) cameraFlashes(3);
   }
+  if (['question', 'answer', 'hearing'].includes(s.phase)) renderStage(politician, entered || s.grill?.index !== prevIndex);
   if (s.phase === 'vote') {
     $('voted').textContent = s.players.filter((p) => p.voted).length;
-    if (entered) renderVoteAnswers();
+    if (entered) renderTranscript();
   }
   if ((s.phase === 'results' || s.phase === 'final') && entered) renderResults();
 
@@ -95,9 +110,38 @@ function renderLobby() {
   const { players } = state;
   $('lobby-players').innerHTML = players.length
     ? players.map((p) => `<li style="--c:${p.color}" class="${p.connected ? '' : 'off'}">
-        <span class="pname">${esc(p.name)}</span><span class="pchar">${esc(charName(p))}</span></li>`).join('')
+        ${face(p)}<span><span class="pname">${esc(p.name)}</span><span class="pchar">${esc(charName(p))}</span></span></li>`).join('')
     : '<li class="empty">Waiting for politicians…</li>';
   $('start').disabled = !players.some((p) => p.connected);
+}
+
+function renderCards() {
+  const html = (state.talkingPoints || []).map((c) => `<span class="tp ${c.used ? 'used' : ''}">${esc(c.text)}</span>`).join('');
+  for (const el of document.querySelectorAll('.cards')) el.innerHTML = html;
+}
+
+function renderPodium(p, speaking) {
+  const html = p
+    ? `<div class="figure ${speaking ? 'speaking' : ''}">${face(p, 'big')}</div>
+       <div class="lectern"><span class="seal">★</span><span class="plate">${esc(charName(p))}</span><small>${esc(p.name)}</small></div>`
+    : '';
+  for (const el of document.querySelectorAll('.podium-figure')) el.innerHTML = html;
+}
+
+function renderStage(politician, newLine) {
+  const g = state.grill;
+  if (!g) return;
+  const asker = playerById(g.journalistId);
+  $('q-count').textContent = `Question ${g.index + 1} of ${g.total}:`;
+  $('asker').textContent = asker ? `${asker.name} (${asker.outlet})` : 'The press';
+  $('question-text').textContent = g.question;
+  const status = {
+    question: '',
+    answer: `${charName(politician)} is preparing a dodge…`,
+    hearing: '',
+  };
+  $('stage-status').textContent = status[state.phase];
+  if (newLine && state.phase !== 'hearing') $('subtitle').classList.add('hidden');
 }
 
 // Counts down locally from remainingMs, so phone and laptop clocks don't matter.
@@ -111,11 +155,12 @@ setInterval(() => {
 
 function setTicker() {
   const lines = {
-    lobby: 'Breaking: politicians gather for emergency press conference · Scan the QR code to take the podium',
-    question: 'Developing: journalist asks the question everyone was afraid of',
-    answer: 'Sources say the statements are being drafted right now',
-    hearing: 'Live: the politicians respond · Fact checkers are on standby',
-    vote: 'Viewers decide: vote on your phone for the best answer',
+    lobby: 'Breaking: emergency press conference called · Scan the QR code and create your politician',
+    ask: 'Developing: journalists sharpen their questions',
+    question: 'Live: the press asks the question everyone was afraid of',
+    answer: 'Sources say a dodge is being prepared',
+    hearing: 'Live: the politician responds · Fact checkers are on standby',
+    vote: 'Viewers decide: toughest question and best dodge',
     results: 'Polls are closed · Results are in',
     final: 'Final results · The press conference is over',
   };
@@ -157,60 +202,65 @@ function play(url, onDone) {
   });
 }
 
-function onQuestion({ round, audioUrl }) {
-  cameraFlashes(4);
-  play(audioUrl, () => socket.emit('question:done', { round }));
+function onQuestion({ round, index, audioUrl }) {
+  cameraFlashes(3);
+  play(audioUrl, () => socket.emit('question:done', { round, index }));
 }
 
-// ---- hearing ---------------------------------------------------------------
-
-function renderPodiums() {
-  const speakingId = state.hearing?.playerId;
-  $('podiums').innerHTML = state.players.map((p) => `
-    <div class="podium ${p.id === speakingId ? 'speaking' : ''}" style="--c:${p.color}">
-      <div class="head"></div>
-      <div class="stand">${esc(charName(p))}</div>
-    </div>`).join('');
-}
-
-function onHearingLine({ index, playerId, character, text, audioUrl }) {
+function onHearingLine({ round, index, playerId, character, text, talkingPoint, audioUrl }) {
   const p = playerById(playerId);
   $('sub-name').textContent = `${character?.name || charName(p)}${p ? ` (${p.name})` : ''}`;
-  $('sub-text').textContent = text;
+  $('sub-text').innerHTML = highlight(text, talkingPoint);
   $('subtitle').style.setProperty('--c', p?.color || '');
   $('subtitle').classList.remove('hidden');
   cameraFlashes(2);
-  play(audioUrl, () => socket.emit('hearing:done', { index }));
+  play(audioUrl, () => socket.emit('hearing:done', { round, index }));
 }
 
 // ---- vote and results ------------------------------------------------------
 
-function renderVoteAnswers() {
-  $('vote-answers').innerHTML = state.answers.map((a) => {
-    const p = playerById(a.playerId);
-    return `<div class="card" style="--c:${p?.color || '#999'}"><span class="who">${esc(charName(p))}</span>${esc(a.text)}</div>`;
+function renderTranscript() {
+  $('transcript').innerHTML = state.transcript.map((t) => {
+    const asker = playerById(t.journalistId);
+    return `<div class="exchange" style="--c:${asker?.color || '#999'}">
+      <p class="q">${face(asker, 'small')}<span><small>${esc(asker?.name)} · ${esc(asker?.outlet)}</small>${esc(t.question)}</span></p>
+      <p class="a">${highlight(t.answer || '', t.talkingPoint)}</p>
+    </div>`;
   }).join('');
 }
 
+function stars(avg) {
+  const n = Math.round(avg);
+  return `${'★'.repeat(n)}${'☆'.repeat(5 - n)}`;
+}
+
 function renderResults() {
-  const { votes = {}, winners = [] } = state.results || {};
   const final = state.phase === 'final';
-  const names = winners.map((id) => charName(playerById(id)));
-  $('winner-line').textContent = final
-    ? `Final results`
-    : names.length ? `${names.join(' and ')} won the room!` : 'Nobody convinced the press.';
-  if (final) setAll('.round-tag', 'Game over');
+  const { bestQuestion = [], dodge = {}, points = {} } = state.results || {};
+  const politician = playerById(state.politicianId);
+  $('results-heading').textContent = final ? 'Final results' : `Round ${state.round} results`;
   $('again').classList.toggle('hidden', !final);
+
+  const best = bestQuestion.map((id) => {
+    const p = playerById(id);
+    const t = state.transcript.find((x) => x.journalistId === id);
+    return `<div class="highlight">${face(p, 'small')}<span><small>Toughest question · +${points[id] || 0}</small><strong>${esc(p?.name)}</strong>“${esc(t?.question)}”</span></div>`;
+  }).join('');
+  const dodgeHtml = politician && dodge.count
+    ? `<div class="highlight">${face(politician, 'small')}<span><small>Dodge rating · +${points[politician.id] || 0}</small><strong>${esc(charName(politician))}</strong><span class="stars">${stars(dodge.average)}</span> ${dodge.average} / 5</span></div>`
+    : '';
+  $('highlights').innerHTML = final ? '' : dodgeHtml + best;
 
   const ranked = [...state.players].sort((a, b) => b.score - a.score);
   const top = ranked[0]?.score;
   $('scoreboard').innerHTML = ranked.map((p, i) => {
-    const win = final ? p.score === top && top > 0 : winners.includes(p.id);
-    const v = votes[p.id] || 0;
+    const win = final && p.score === top && top > 0;
+    const gained = points[p.id] || 0;
     return `<li class="${win ? 'winner' : ''}" style="--c:${p.color}; animation-delay:${i * 0.15}s">
       <span class="rank">${i + 1}</span>
+      ${face(p, 'small')}
       <span class="who">${esc(p.name)}<small>${esc(charName(p))}</small></span>
-      <span class="delta">${v ? `+${v} vote${v > 1 ? 's' : ''}` : ''}</span>
+      <span class="delta">${!final && gained ? `+${gained}` : ''}</span>
       <span>${p.score}</span>
     </li>`;
   }).join('');
