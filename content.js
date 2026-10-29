@@ -60,6 +60,29 @@ const content = {
     'My lawyer has advised me to simply... smile.',
     'I would like to thank my mother. Goodbye.',
   ],
+
+  // Random delivery for answers read on stage: one tag at the start, sometimes a second
+  // one before a later sentence. Only the voice hears them; screens show the clean text.
+  // Tag ideas: https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
+  answerTags: [
+    '[nervous laugh]', '[sighs]', '[sarcastic]', '[whispers]', '[excited]', '[clears throat]',
+    '[laughs]', '[confidently]', '[defensive]', '[crying]', '[snorts]', '[mischievously]',
+    '[exhales]', '[gulps]', '[shouting]', '[starts laughing]',
+  ],
+  secondTagChance: 0.5,
+
+  // Bots fill the room when a judge plays alone. They pick one of these at random,
+  // so make them funny and general enough to fit any question. Audio tags work here.
+  botNames: ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'],
+  botAnswers: [
+    'Let me be absolutely clear: I have no idea what you are talking about.',
+    'That is a great question, and I will answer it right after the election.',
+    'I was not there. And if I was there, I was not paying attention.',
+    'My opponent would love for you to ask that. Next question!',
+    'I take full responsibility, and I blame my staff.',
+    '[sighs] Look. We all make mistakes. Mine were just bigger.',
+    'Absolutely not. Well, maybe. Probably yes.',
+  ],
 };
 
 // Pre-made question MP3s are named after the question text and the voice reading it,

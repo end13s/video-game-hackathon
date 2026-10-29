@@ -1,16 +1,11 @@
-// TV audio: sound effects, music, the anchor, and the spoken-line queue.
-// It plays audioUrl from question:ask and hearing:line and sends question:done /
-// hearing:done when each one ends, so tv.js must not play those itself.
+// TV sound design: effects, music, crowd reactions and the anchor. tv.js keeps playing
+// the question and answer audio; this file only adds sound around it.
 //
 // In tv.html, before tv.js:   <script src="/sound.js"></script>
 // In tv.js, after io():        PressAudio.attach(socket);
 //
-// Subtitles: by default it shows its own subtitle bar at the bottom of the screen. To draw
-// them yourself, pass callbacks instead:
-//   PressAudio.attach(socket, {
-//     onSubtitle({ kind, speaker, text, playerId }) {},   // kind: 'question' | 'hearing' | 'anchor'
-//     onSubtitleEnd() {},
-//   });
+// The anchor's lines get their own subtitle bar. To draw them yourself, pass callbacks:
+//   PressAudio.attach(socket, { onSubtitle({ speaker, text }) {}, onSubtitleEnd() {} });
 // Sound effects by hand: PressAudio.sfx('gasp'). Names are the files in public/audio/.
 (function () {
   // ---- content: anchor lines ----------------------------------------------------
@@ -33,14 +28,13 @@
   // ---- sounds -------------------------------------------------------------------
   // name -> volume (0..1). Files are public/audio/<name>.mp3, made by `npm run audio:sfx`.
   const VOLUME = {
-    shutter: 0.7, murmur: 0.25, boo: 0.5, gasp: 0.6, laugh: 0.5, applause: 0.6,
-    sting: 0.8, countdown: 0.6, join: 0.6, intro: 0.35, victory: 0.6,
+    shutter: 0.5, murmur: 0.18, boo: 0.45, gasp: 0.55, laugh: 0.45, applause: 0.55,
+    sting: 0.7, countdown: 0.5, join: 0.6, intro: 0.3, victory: 0.55,
   };
-  const SPEECH_VOLUME = 1;
+  const MURMUR_UNDER_SPEECH = 0.06; // crowd volume while someone is on stage
   const REACTIONS = ['laugh', 'laugh', 'gasp', 'applause', 'boo'];
   const COUNTDOWN_MS = 5000; // length of countdown.mp3, it starts this long before the timer ends
-  const MAX_LINE_MS = 25000; // give up on a line that never ends
-  const PAUSE_AFTER_LINE_MS = 700;
+  const MAX_LINE_MS = 20000; // give up on an anchor line that never ends
 
   let socket = null;
   let opts = {};
@@ -51,13 +45,12 @@
   function sfx(name, volume) {
     let base = sfxCache.get(name);
     if (!base) {
-      base = new Audio(`/audio/${name}.mp3`);
-      base.preload = 'auto';
+      base = Object.assign(new Audio(`/audio/${name}.mp3`), { preload: 'auto' });
       sfxCache.set(name, base);
     }
     // Clone so the same sound can overlap itself.
     const a = base.cloneNode();
-    a.volume = volume ?? VOLUME[name] ?? 0.6;
+    a.volume = volume ?? VOLUME[name] ?? 0.5;
     a.play().catch(() => {});
     return a;
   }
@@ -65,20 +58,19 @@
   function loop(name, on, volume) {
     let a = loops.get(name);
     if (!on) {
-      if (a) fade(a, 0, 800, () => a.pause());
+      if (a && !a.paused) fade(a, 0, 800, () => a.pause());
+      else if (a) a.volume = 0; // never started (sound still locked), so don't start it on unlock
       return;
     }
     if (!a) {
-      a = new Audio(`/audio/${name}.mp3`);
-      a.loop = true;
+      a = Object.assign(new Audio(`/audio/${name}.mp3`), { loop: true, volume: 0 });
       loops.set(name, a);
     }
-    const target = volume ?? VOLUME[name] ?? 0.3;
     if (a.paused) {
       a.volume = 0;
       a.play().catch(() => {});
     }
-    fade(a, target, 800);
+    fade(a, volume ?? VOLUME[name] ?? 0.3, 800);
   }
 
   function fade(a, to, ms, done) {
@@ -95,20 +87,19 @@
     }, 40);
   }
 
-  // Browsers block sound until the page has been clicked once. Any click or key unlocks it.
+  // Browsers block sound until the page has been clicked once. Any click or key unlocks
+  // it, then whatever should be looping starts.
   let unlocked = false;
   function unlock() {
     if (unlocked) return;
     unlocked = true;
-    const silent = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
-    silent.play().catch(() => {});
-    for (const a of loops.values()) if (!a.paused || a.volume > 0) a.play().catch(() => {});
+    for (const [name, a] of loops) if (a.paused && a.volume > 0) loop(name, true);
     if (lastPhase === 'lobby') loop('intro', true);
   }
   document.addEventListener('pointerdown', unlock, true);
   document.addEventListener('keydown', unlock, true);
 
-  // ---- subtitles ----------------------------------------------------------------
+  // ---- anchor -------------------------------------------------------------------
 
   let bar = null;
   function showSubtitle(line) {
@@ -116,17 +107,16 @@
     if (!bar) {
       bar = document.createElement('div');
       bar.style.cssText =
-        'position:fixed;left:50%;bottom:6vh;transform:translateX(-50%);max-width:80vw;padding:18px 32px;' +
-        'border-radius:16px;background:rgba(0,0,0,.82);color:#fff;font:600 clamp(24px,3.2vw,52px)/1.25 system-ui,sans-serif;' +
+        'position:fixed;left:50%;bottom:9vh;transform:translateX(-50%);max-width:80vw;padding:18px 32px;' +
+        'border-radius:16px;background:rgba(0,0,0,.85);color:#fff;font:600 clamp(24px,3vw,48px)/1.25 system-ui,sans-serif;' +
         'text-align:center;z-index:1000;pointer-events:none;box-shadow:0 10px 40px rgba(0,0,0,.5)';
       document.body.appendChild(bar);
     }
     const speaker = document.createElement('div');
-    speaker.style.cssText = 'font-size:.55em;opacity:.7;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px';
-    speaker.textContent = line.speaker || '';
+    speaker.style.cssText = 'font-size:.5em;opacity:.7;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px';
+    speaker.textContent = line.speaker;
     const text = document.createElement('div');
-    // Audio tags are for the voice, not for reading.
-    text.textContent = line.text.replace(/\[[^\]]*\]\s*/g, '');
+    text.textContent = line.text;
     bar.replaceChildren(speaker, text);
     bar.style.display = '';
   }
@@ -135,73 +125,48 @@
     if (bar) bar.style.display = 'none';
   }
 
-  // ---- speech queue -------------------------------------------------------------
-  // One voice at a time. Game lines (question, hearing) cut off whatever is playing,
-  // because the server has already moved on; anchor lines wait their turn.
+  const anchorVoice = new Audio();
+  let anchorTimer = null;
+  let anchorToken = 0;
 
-  const voice = new Audio();
-  const queue = [];
-  let current = null;
-
-  function say(item, { interrupt = false } = {}) {
-    if (interrupt) {
-      queue.length = 0;
-      if (current) finish(current, false);
-    }
-    queue.push(item);
-    if (!current) next();
-  }
-
-  function next() {
-    const item = queue.shift();
-    if (!item) return;
-    current = item;
-    showSubtitle(item);
-    if (loops.get('murmur')) fade(loops.get('murmur'), 0.08, 400);
-
-    const end = () => finish(item, true);
-    // Without audio, leave the subtitle up for about as long as it would take to say it.
-    const readMs = Math.min(MAX_LINE_MS, 2000 + item.text.length * 65);
-    item.timer = setTimeout(end, item.url ? MAX_LINE_MS : readMs);
-    if (!item.url) return;
-
-    voice.src = item.url;
-    voice.volume = SPEECH_VOLUME;
-    voice.onended = end;
-    voice.onerror = () => {
-      clearTimeout(item.timer);
-      item.timer = setTimeout(end, readMs);
-    };
-    voice.play().catch(() => voice.onerror());
-  }
-
-  function finish(item, natural) {
-    if (current !== item) return;
-    clearTimeout(item.timer);
-    voice.onended = voice.onerror = null;
-    voice.pause();
-    current = null;
+  function stopAnchor() {
+    anchorToken++;
+    clearTimeout(anchorTimer);
+    anchorVoice.onended = anchorVoice.onerror = null;
+    anchorVoice.pause();
     hideSubtitle();
-    if (loops.get('murmur') && ['hearing', 'vote', 'question', 'answer'].includes(lastPhase)) fade(loops.get('murmur'), VOLUME.murmur, 800);
-    if (natural && item.onEnd) item.onEnd();
-    next();
   }
 
   async function anchorSay(key, name) {
+    stopAnchor();
+    const token = anchorToken;
     const list = ANCHOR[key];
-    const text = list[Math.floor(Math.random() * list.length)].replace('{name}', name || '');
+    const speech = list[Math.floor(Math.random() * list.length)].replace('{name}', name || '');
+    const text = speech.replace(/\[[^\]]*\]\s*/g, ''); // tags are for the voice only
     let url = null;
     if (voiceEnabled) {
       try {
         const res = await fetch('/api/speak', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, voice: 'anchor' }),
+          body: JSON.stringify({ text: speech, voice: 'anchor' }),
         });
         if (res.ok) url = (await res.json()).url;
       } catch {}
     }
-    say({ kind: 'anchor', speaker: 'Anchor', text, url });
+    if (token !== anchorToken) return; // something newer started meanwhile
+
+    showSubtitle({ speaker: 'Anchor', text });
+    const readMs = Math.min(MAX_LINE_MS, 2000 + text.length * 65);
+    anchorTimer = setTimeout(stopAnchor, url ? MAX_LINE_MS : readMs);
+    if (!url) return;
+    anchorVoice.src = url;
+    anchorVoice.onended = stopAnchor;
+    anchorVoice.onerror = () => {
+      clearTimeout(anchorTimer);
+      anchorTimer = setTimeout(stopAnchor, readMs);
+    };
+    anchorVoice.play().catch(() => anchorVoice.onerror && anchorVoice.onerror());
   }
 
   // ---- game events --------------------------------------------------------------
@@ -221,7 +186,7 @@
     const changed = phase !== lastPhase;
 
     // Join chime for every new player in the lobby.
-    if (phase === 'lobby' && state.players.length > lastPlayerCount && lastPhase !== null) sfx('join');
+    if (phase === 'lobby' && lastPhase === 'lobby' && state.players.length > lastPlayerCount) sfx('join');
     lastPlayerCount = state.players.length;
 
     // Countdown before answering or voting closes. Rescheduled on every state, since
@@ -239,71 +204,31 @@
     if (!changed) return;
     const from = lastPhase;
     lastPhase = phase;
+    if (from === 'results' || from === 'final') stopAnchor();
 
-    if (phase === 'lobby') {
-      queue.length = 0;
-      if (current) finish(current, false);
-      loop('murmur', false);
-      loop('intro', true);
-    } else {
-      loop('intro', false);
-    }
+    loop('intro', phase === 'lobby');
+    if (phase === 'question' || phase === 'answer' || phase === 'vote') loop('murmur', true);
+    else if (phase === 'hearing') loop('murmur', true, MURMUR_UNDER_SPEECH);
+    else loop('murmur', false);
 
-    if (['question', 'answer', 'hearing', 'vote'].includes(phase)) loop('murmur', true);
+    if (phase === 'vote' && from === 'hearing') sfx('sting', 0.4);
 
     if (phase === 'results' || phase === 'final') {
-      loop('murmur', false);
       const { votes = {}, winners = [] } = state.results || {};
       sfx('sting');
-      setTimeout(() => sfx('applause'), 600);
+      setTimeout(() => sfx('applause'), 500);
       if (phase === 'final') {
         setTimeout(() => sfx('victory'), 1200);
         const top = [...state.players].sort((a, b) => b.score - a.score)[0];
-        anchorSay('final', top ? nameOf(state, top.id) : '');
+        setTimeout(() => anchorSay('final', top ? nameOf(state, top.id) : ''), 1500);
       } else if (!Object.keys(votes).length) {
-        anchorSay('noVotes');
+        setTimeout(() => anchorSay('noVotes'), 1200);
       } else if (winners.length > 1) {
-        anchorSay('tie');
+        setTimeout(() => anchorSay('tie'), 1200);
       } else {
-        anchorSay('roundResult', nameOf(state, winners[0]));
+        setTimeout(() => anchorSay('roundResult', nameOf(state, winners[0])), 1200);
       }
     }
-
-    if (phase === 'vote' && from === 'hearing') sfx('sting', 0.5);
-  }
-
-  function onQuestion({ round, text, journalist, audioUrl }) {
-    sfx('shutter');
-    // Let the shutters land before the journalist talks.
-    setTimeout(() => {
-      say(
-        {
-          kind: 'question',
-          speaker: journalist ? `${journalist.name}, ${journalist.outlet}` : 'Question',
-          text,
-          url: audioUrl,
-          onEnd: () => socket.emit('question:done', { round }),
-        },
-        { interrupt: true },
-      );
-    }, 900);
-  }
-
-  function onHearing({ index, playerId, character, text, audioUrl }) {
-    say(
-      {
-        kind: 'hearing',
-        speaker: character ? character.name : '',
-        playerId,
-        text,
-        url: audioUrl,
-        onEnd: () => {
-          sfx(REACTIONS[Math.floor(Math.random() * REACTIONS.length)]);
-          setTimeout(() => socket.emit('hearing:done', { index }), PAUSE_AFTER_LINE_MS);
-        },
-      },
-      { interrupt: true },
-    );
   }
 
   function attach(s, options = {}) {
@@ -314,11 +239,19 @@
       .then((c) => (voiceEnabled = Boolean(c.voiceEnabled)))
       .catch(() => {});
     socket.on('game:state', onState);
-    socket.on('question:ask', onQuestion);
-    socket.on('hearing:line', onHearing);
+    socket.on('question:ask', () => sfx('shutter'));
+    socket.on('hearing:line', () => sfx('shutter', 0.25));
+
+    // The crowd reacts when an answer finishes. tv.js reports that with hearing:done.
+    const emit = socket.emit.bind(socket);
+    socket.emit = (event, ...args) => {
+      if (event === 'hearing:done') sfx(REACTIONS[Math.floor(Math.random() * REACTIONS.length)]);
+      return emit(event, ...args);
+    };
+
     // Preload the short effects so the first one isn't late.
-    for (const name of Object.keys(VOLUME)) if (!['murmur', 'intro', 'victory'].includes(name)) sfxCache.set(name, Object.assign(new Audio(`/audio/${name}.mp3`), { preload: 'auto' }));
+    for (const name of Object.keys(VOLUME)) if (!['murmur', 'intro', 'victory'].includes(name)) sfx(name, 0).pause();
   }
 
-  window.PressAudio = { attach, sfx, loop, say, anchorSay, unlock };
+  window.PressAudio = { attach, sfx, loop, anchorSay };
 })();

@@ -9,7 +9,8 @@
     "audio:voices": "node tools/audio/voices.js",
     "audio:sfx": "node tools/audio/sfx.js",
     "audio:questions": "node tools/audio/questions.js",
-    "audio": "npm run audio:voices && npm run audio:sfx && npm run audio:questions"
+    "audio": "npm run audio:voices && npm run audio:sfx && npm run audio:questions",
+    "bots": "node tools/bots.js"
   },
   "dependencies": {
     "dotenv": "^18.0.9",

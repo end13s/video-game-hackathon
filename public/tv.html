@@ -3,64 +3,88 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TV</title>
+  <title>Press Conference</title>
   <link rel="icon" href="data:,">
-  <style>
-    * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; overflow: hidden; }
-    body { display: grid; grid-template-columns: 1fr 300px; background: #0b0d12; color: #eef0f4; font: 16px/1.4 system-ui, -apple-system, sans-serif; }
-    #stage { position: relative; min-width: 0; }
-    #game { position: absolute; inset: 0; }
-    .phase-screen { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 28px; border-radius: 12px; background: rgba(27,30,39,.85); text-align: center; pointer-events: none; }
-    .phase-screen strong { display: block; font-size: 28px; text-transform: uppercase; letter-spacing: .1em; }
-    .phase-screen span { color: #9aa3b2; }
-    aside { background: #151820; padding: 18px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-    #qr { width: 100%; aspect-ratio: 1; background: #fff; border-radius: 10px; image-rendering: pixelated; }
-    #join-url { font: 13px ui-monospace, Menlo, monospace; word-break: break-all; color: #9aa3b2; }
-    #url-warning { color: #fbbf24; font-size: 13px; }
-    h2 { margin: 0; font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: #9aa3b2; }
-    #players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-    #players li { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-    #players li.away { opacity: .4; }
-    #players i { width: 16px; height: 16px; border-radius: 50%; display: inline-block; }
-    #feed { font-size: 14px; display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
-    .dev { margin-top: auto; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #2a2f3c; padding-top: 12px; }
-    .dev button { border: 0; border-radius: 8px; padding: 10px; font: inherit; font-weight: 600; background: #2c3140; color: inherit; cursor: pointer; }
-    .dev button.on { background: #16a34a; }
-    .dev label { font-size: 14px; color: #9aa3b2; }
-    .hidden { display: none !important; }
-  </style>
+  <link rel="stylesheet" href="/tv.css">
 </head>
-<body>
-  <main id="stage">
-    <div id="game"></div>
-    <div class="phase-screen" data-phase="lobby"><strong>Lobby</strong><span>Scan the code to join</span></div>
-    <div class="phase-screen hidden" data-phase="play"><strong>Play</strong><span>placeholder</span></div>
-    <div class="phase-screen hidden" data-phase="vote"><strong>Vote</strong><span>placeholder</span></div>
-    <div class="phase-screen hidden" data-phase="results"><strong>Results</strong><span>placeholder</span></div>
+<body data-phase="lobby">
+  <div id="flash"></div>
+  <button id="sound">Click to enable sound</button>
+
+  <header id="top">
+    <div class="bug"><span class="live">● LIVE</span><span class="channel">PRESS CONFERENCE</span></div>
+    <div id="timer" class="hidden"><span id="timer-num">0</span></div>
+  </header>
+
+  <main>
+    <section data-screen="lobby">
+      <div class="lobby-join">
+        <div id="qr"></div>
+        <p class="join-label">Scan to join the press conference</p>
+        <p id="join-url" class="mono"></p>
+        <p id="url-warning" class="warn hidden">This is a localhost address, phones can't reach it. Open the TV through the tunnel URL, or set PUBLIC_URL in .env.</p>
+      </div>
+      <div class="lobby-side">
+        <h1 class="title">Press<br>Conference</h1>
+        <p class="sub">Answer the journalists. Your politician says it out loud. Best dodge wins.</p>
+        <ul id="lobby-players" class="player-list"></ul>
+        <div class="lobby-buttons">
+          <button id="start" class="big-btn" disabled>Start (Enter)</button>
+          <button id="add-bot" class="big-btn ghost-btn">Add bot (B)</button>
+        </div>
+        <p id="start-error" class="lobby-error"></p>
+      </div>
+    </section>
+
+    <section data-screen="question">
+      <p class="round-tag"></p>
+      <div class="card question-card">
+        <p class="from">Question from <strong class="journalist"></strong></p>
+        <p class="question-text"></p>
+      </div>
+    </section>
+
+    <section data-screen="answer">
+      <div class="card question-card small">
+        <p class="from"><strong class="journalist"></strong> asks</p>
+        <p class="question-text"></p>
+      </div>
+      <p class="status">The politicians are preparing their statements…</p>
+      <p class="counter"><span id="answered">0</span> / <span class="total">0</span> answers in</p>
+    </section>
+
+    <section data-screen="hearing">
+      <div class="card question-card small">
+        <p class="from"><strong class="journalist"></strong> asks</p>
+        <p class="question-text"></p>
+      </div>
+      <div id="podiums" class="podiums"></div>
+      <div id="subtitle" class="lower-third hidden">
+        <p id="sub-name" class="lt-name"></p>
+        <p id="sub-text" class="lt-text"></p>
+      </div>
+    </section>
+
+    <section data-screen="vote">
+      <h2 class="heading">Vote for the best answer</h2>
+      <div id="vote-answers" class="answer-grid"></div>
+      <p class="counter"><span id="voted">0</span> / <span class="total">0</span> votes in</p>
+    </section>
+
+    <section data-screen="results">
+      <p class="round-tag"></p>
+      <h2 class="heading" id="winner-line"></h2>
+      <ol id="scoreboard" class="scoreboard"></ol>
+      <button id="again" class="big-btn hidden">Play again (Enter)</button>
+    </section>
   </main>
 
-  <aside>
-    <img id="qr" alt="QR code to join">
-    <div id="join-url"></div>
-    <div id="url-warning" class="hidden">This is a localhost address, phones can't reach it. Open the TV page through the tunnel URL, or set PUBLIC_URL in .env.</div>
-
-    <h2>Players <span id="player-count"></span></h2>
-    <ul id="players"></ul>
-
-    <h2>Text from phones</h2>
-    <div id="feed"></div>
-
-    <div class="dev">
-      <h2>Dev</h2>
-      <button id="next-phase">Next phase (<span id="phase-name">lobby</span>)</button>
-      <button id="sound-btn">Enable sound</button>
-      <label><input type="checkbox" id="speak-text"> Speak incoming text</label>
-    </div>
-  </aside>
+  <footer id="ticker"><div class="ticker-track"><span id="ticker-text"></span></div></footer>
+  <div id="dev">Enter start · B add bot · N skip phase · R reset</div>
+  <div id="offline" class="hidden">Reconnecting to the server…</div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/lib/phaser/phaser.min.js"></script>
+  <script src="/sound.js"></script>
   <script src="/tv.js"></script>
 </body>
 </html>
