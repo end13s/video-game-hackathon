@@ -1,41 +1,97 @@
 # Press Conference
 
-> **TODO before the jam:** write the concept summary and the round loop. The sections below only hold what's already agreed elsewhere (the stack, the audio list and the decision rule in [PLAN.md](PLAN.md)). Fill in the gaps and finish the message list, in the same format as [one-vessel-one-traitor.md](one-vessel-one-traitor.md).
-
 ## Concept
 
-TODO: one-paragraph summary.
+Every player is a politician at a press conference. A journalist asks a question (read aloud in the journalist's voice), everyone types an answer on their phone, and then the TV plays every answer in that player's politician voice, with subtitles and crowd reactions. Players vote for the best answer. Votes are points.
 
-Already agreed:
-
-- We build this if the theme suits a **talking game**.
-- Players **write text on their phones**, and a **character voice reads it aloud on the TV** (ElevenLabs text-to-speech, called from the server). No Voice Changer.
-- Audio planned in [night-of-checklist.md](night-of-checklist.md): an anchor voice plus about 6 character voices, camera shutters, crowd murmur, boo, gasp, laugh, applause, sting, countdown, join chime, an intro loop and a victory song.
+Theme: decides who the politicians are, what the journalists ask, and the look of the room. Elijah writes the questions and characters in `content.js`.
 
 ## Round loop
 
-TODO.
+One round is about 2 minutes. A game is `ROUNDS` rounds (3 by default, 1 for the demo).
+
+| Phase | Length | What happens |
+|---|---|---|
+| `lobby` | until Start | Players scan the QR code and join. Each gets a politician character |
+| `question` | until the TV finishes playing it (max 20 s) | A journalist asks the question |
+| `answer` | 45 s, or until everyone has answered | Players type an answer. They can change it until time is up. Empty answers get a stock line ("No comment.") |
+| `hearing` | one line after another | The TV plays each answer in the player's voice. Text-to-speech for all answers starts as soon as answering closes |
+| `vote` | 20 s, or until everyone has voted | Each player votes for one answer, not their own |
+| `results` | 10 s | Votes and points for the round |
+| `final` | until the host restarts | After the last round: final scores and the winner |
+
+Scoring: 100 points per vote received.
 
 ## Message list
 
-Same naming style as the starter: `subject:action`. The server adds `playerId` to anything it forwards from a phone.
+Naming: `subject:action`. The server knows who sent a message from the socket, so phones never send their own id after joining.
 
-These are needed whatever the final rules are:
+**The main idea:** the server broadcasts `game:state` with everything public after every change. Screens just redraw from the latest `game:state`. A few extra messages carry things that happen once (play this audio) or are private (your own answer).
 
-| Message | From → To | Payload | When |
+### Phone → server
+
+| Message | Payload | Ack | When |
 |---|---|---|---|
-| `player:join` | phone → server | `{ playerId, name }`, ack `{ player, phase }` or `{ error }` | Tap to join, and after every reconnect |
-| `tv:join` | TV → server | none, ack `{ players, phase, scores }` | TV connects or reconnects |
-| `players` | server → everyone | `{ players: [{ id, name, color, connected }] }` | Any join, rejoin or disconnect |
-| `phase` | server → everyone | `{ phase }` | Every phase change (phase names TODO) |
-| `game:start` | TV → server | none | Host presses Start in the lobby |
-| `player:text` | phone → server | `{ text }` (cap the length, e.g. 200 chars) | Player submits a line |
-| `line:speak` | server → TV | `{ playerId, text, voiceId, audioUrl }` | Server has started text-to-speech for a line; the TV plays `audioUrl` |
-| `line:done` | TV → server | `{ playerId }` | The TV finished playing a line, so the server can move on |
-| `vote:cast` | phone → server | `{ targetId }`, ack `{ ok }` | Player votes |
-| `vote:progress` | server → TV | `{ voted, total }` | After every vote |
-| `phase:next` | TV → server | none | Host or dev button |
+| `player:join` | `{ playerId, name }` | `{ you }` or `{ error }` | Tap to join, and after every reconnect |
+| `answer:submit` | `{ text }` (max 200 chars) | `{ ok: true }` or `{ error }` | During `answer`. Sending again replaces the answer |
+| `vote:cast` | `{ targetId }` (a player id) | `{ ok: true }` or `{ error }` | During `vote`. Sending again changes the vote. Can't vote for yourself |
 
-TODO: messages specific to this concept's rules.
+### TV → server
 
-Text-to-speech flow: the server calls `/v1/text-to-speech/{voice_id}/stream` with `eleven_v4_turbo` and streams it to the TV (see [tools/phone-test/tts.js](../tools/phone-test/tts.js) and [cheatsheet.md](cheatsheet.md)). Expect a short delay before playback; measure it with the phone test's voice test and design around it (e.g. the anchor's line or a camera-shutter sound covers the gap).
+| Message | Payload | Ack | When |
+|---|---|---|---|
+| `tv:join` | none | `{ state }` | TV connects or reconnects |
+| `game:start` | none | `{ ok }` or `{ error }` | Start button in the lobby (needs 2+ players) |
+| `question:done` | `{ round }` | none | The question audio finished playing |
+| `hearing:done` | `{ index }` | none | One hearing line finished playing |
+| `phase:next` | none | none | Dev button: skip the rest of the current phase (in the lobby it starts the game with any number of players) |
+| `game:reset` | none | none | Dev button / "Play again": back to the lobby, scores to 0, players stay |
+
+If the TV never sends `question:done` or `hearing:done` (no audio, page closed), the server moves on by itself after a time based on the text length.
+
+### Server → everyone
+
+| Message | Payload | When |
+|---|---|---|
+| `game:state` | see below | After every change |
+| `question:ask` | `{ round, text, journalist: { id, name, outlet }, audioUrl }` | Start of `question`. The TV plays `audioUrl` (may be `null`: show the text only) |
+| `hearing:line` | `{ index, total, playerId, character: { id, name, title }, text, audioUrl }` | Each line in `hearing`. The TV plays `audioUrl` and shows `text` as a subtitle |
+
+### Server → one phone
+
+| Message | Payload | When |
+|---|---|---|
+| `you` | `{ player, answer, vote }`: your player (with character), your answer text this round, the id you voted for | After joining, after your own answer or vote, and at the start of each round |
+
+### `game:state`
+
+```js
+{
+  phase: 'lobby' | 'question' | 'answer' | 'hearing' | 'vote' | 'results' | 'final',
+  remainingMs: 31000,        // time left in this phase, null if it has no timer. Start your countdown when the message arrives
+  round: 1,                  // 0 in the lobby
+  totalRounds: 3,
+  players: [{
+    id, name, color, connected, score,
+    character: { id, name, title },
+    answered: true,          // this round (during answer)
+    voted: false,            // this round (during vote)
+  }],
+  question: { text, journalist: { id, name, outlet } },   // null in the lobby
+  hearing: { index: 0, total: 4, playerId },              // null outside hearing
+  answers: [{ playerId, text }],                          // only in vote, results and final, otherwise []
+  results: { votes: { [playerId]: 2 }, points: { [playerId]: 200 }, winners: [playerId] },  // results and final, otherwise null
+}
+```
+
+### HTTP
+
+| Route | What |
+|---|---|
+| `GET /` | Phone page |
+| `GET /tv` | TV page |
+| `GET /config` | `{ publicUrl, voiceEnabled }` |
+| `GET /qr.svg?text=...` | QR code |
+| `POST /api/speak` | `{ text, voice }` where `voice` is a character or journalist id, or `anchor`. Returns `{ url }`. For extra lines on the TV (anchor intro, winner) |
+| `GET /speech/:id` | Streams a text-to-speech result |
+| `/audio/*.mp3` | Elijah's sound effects and music in `public/audio/` |

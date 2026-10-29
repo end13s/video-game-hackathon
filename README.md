@@ -24,6 +24,15 @@ cloudflared tunnel --url http://localhost:3000
 | `PORT` | Defaults to 3000 |
 | `PUBLIC_URL` | The tunnel URL, if the TV page should show it in the QR code while opened on `localhost` |
 
+## Run the game
+
+```
+npm start
+cloudflared tunnel --url http://localhost:3000
+```
+
+Open `<tunnel URL>/tv` on the TV; phones scan the QR code. Add `ROUNDS=1` to `.env` for a one-round demo (default 3). Game content (characters, voices, questions) lives in `content.js`, the message list in [docs/press-conference.md](docs/press-conference.md).
+
 ## Phone test
 
 A throwaway diagnostic to check real phones before we build anything on top of them.
