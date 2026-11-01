@@ -4,44 +4,54 @@
 
 A party game about politics. The game runs on a TV or laptop screen, 2–6 players scan a QR code to join, and their phones become the controllers. One player takes the podium as a cartoon politician; everyone else is the press.
 
-![A politician answers a question at the podium while the press room watches](docs/screenshots/tv-hearing.jpg)
+![George Washingmachine releases a duck at the podium while his answer plays](docs/screenshots/tv-slip.jpg)
 
 ## How a round works
 
-1. **Breaking news.** The anchor reads a scandal about the politician at the podium ("Bernie Sandwiches accused of cancelling Christmas").
+1. **Breaking news.** The anchor reads a scandal about the politician at the podium ("George Washingmachine photographed at a casino during the flood").
 2. **The press asks.** Every journalist writes a question on their phone, then votes for the best one. The TV reads the winner aloud in a reporter's voice.
 3. **Someone hacks the teleprompter.** One journalist secretly writes how the politician's answer starts ("As a proud lizard, I…").
 4. **The politician answers.** They see the opener on their phone and have to finish the sentence, live.
 5. **The hearing.** The TV plays the full answer in the politician's AI-generated voice while the press throws tomatoes, boos and laughs, and the approval meter swings.
-6. **The verdict.** Journalists rate the answer 1–5 stars and the saboteur is revealed. Everyone takes the podium once; most points wins.
+6. **The slip.** While the press is busy with their phones, the politician can secretly do something shady on the TV, once a round: pocket the cash, read a cheat sheet, release a duck or take a bribe. It's on screen for about a second. Journalists who were watching hit **GOTCHA** within 2.5 seconds for +150 (a wrong GOTCHA costs 50); the politician gets +100 for every journalist who missed it.
+7. **The verdict.** Journalists rate the answer 1–5 stars, the saboteur is revealed, and the TV replays the slip at half speed with who caught it. Everyone takes the podium once; most points wins.
 
-The cast is eight cartoon parodies: Donald Frump, Barack O'Banana, Joe Bidet, Hillary Clingfilm, Bernie Sandwiches, Kamala Harrass, George W. Shrub and Abraham Stinkoln.
+The cast is eight cartoon parodies: Donald Frump, Barack O'Llama, Joe Bidet, JD Pants, Bernie Sandwiches, Kamala Harrass, George Washingmachine and Abraham Stinkoln.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/tv-lobby.jpg" alt="TV lobby with the QR code to join" /></td>
-    <td width="50%"><img src="docs/screenshots/tv-results.jpg" alt="Final results on the TV" /></td>
+    <td width="33%"><img src="docs/screenshots/tv-lobby.jpg" alt="TV lobby with the QR code to join" /></td>
+    <td width="33%"><img src="docs/screenshots/tv-replay.jpg" alt="Half-speed replay of the slip, with who caught it" /></td>
+    <td width="33%"><img src="docs/screenshots/tv-results.jpg" alt="Final results on the TV" /></td>
   </tr>
   <tr>
     <td align="center">Scan to join</td>
+    <td align="center">The replay</td>
     <td align="center">Final results</td>
   </tr>
 </table>
 
-<p>
-  <img src="docs/screenshots/phone-create.jpg" alt="Phone: pick your politician" width="240" />
-  &nbsp;&nbsp;
-  <img src="docs/screenshots/phone-answer.jpg" alt="Phone: the politician finishes the sabotaged answer" width="240" />
-</p>
-
-Phones: pick your politician, then finish whatever the saboteur put on your teleprompter.
+<table>
+  <tr>
+    <td><img src="docs/screenshots/phone-create.jpg" alt="Phone: pick your politician" width="180" /></td>
+    <td><img src="docs/screenshots/phone-answer.jpg" alt="Phone: the politician finishes the sabotaged answer" width="180" /></td>
+    <td><img src="docs/screenshots/phone-slip.jpg" alt="Phone: the politician picks a slip" width="180" /></td>
+    <td><img src="docs/screenshots/phone-gotcha.jpg" alt="Phone: a journalist's GOTCHA button and heckles" width="180" /></td>
+  </tr>
+  <tr>
+    <td align="center">Pick your politician</td>
+    <td align="center">Finish the teleprompter</td>
+    <td align="center">Slip up</td>
+    <td align="center">GOTCHA and heckle</td>
+  </tr>
+</table>
 
 ## Team
 
 | | Built |
 |---|---|
 | [Eduard Dehelean](https://github.com/end13s) | Game server, phases and scoring, rooms, bots, the message list |
-| [Finn Murray](https://github.com/finnmurray1) | Front end: TV game screen, phone controller, character creator and the press-room scene |
+| [Finn Murray](https://github.com/finnmurray1) | Front end (TV game screen, phone controller, character creator, press-room scene) and the slip / GOTCHA mechanic |
 | Elijah Brough | Voices, sound effects, music, and game writing (headlines, questions, characters) |
 
 ## Stack
