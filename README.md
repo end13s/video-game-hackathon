@@ -1,48 +1,87 @@
-# video-game-hackathon
+# Press Conference
 
-Our entry for the Chroma Awards 4-hour game jam (San Francisco, Oct 28, 2026), probably in the Party Games track: the game runs on a TV or laptop screen, 2–6 players join by scanning a QR code, and their phones are the controllers.
+**🏆 1st place, Chroma Awards 4H Game Jam** (San Francisco, Oct 28, 2026). Built in one evening by a team of three.
 
-Stack: one Node.js process (Express + Socket.io) on port 3000, a Phaser 3 + Matter.js TV page, plain JavaScript with no build step, ElevenLabs text-to-speech called from the server, and a Cloudflare quick tunnel for HTTPS so phones can reach the laptop.
+A party game about politics. The game runs on a TV or laptop screen, 2–6 players scan a QR code to join, and their phones become the controllers. One player takes the podium as a cartoon politician; everyone else is the press.
 
-The game itself gets built during the jam. Right now the repo has the plan, the docs and a phone test tool.
+![A politician answers a question at the podium while the press room watches](docs/screenshots/tv-hearing.jpg)
 
-## Quick start
+## How a round works
+
+1. **Breaking news.** The anchor reads a scandal about the politician at the podium ("Bernie Sandwiches accused of cancelling Christmas").
+2. **The press asks.** Every journalist writes a question on their phone, then votes for the best one. The TV reads the winner aloud in a reporter's voice.
+3. **Someone hacks the teleprompter.** One journalist secretly writes how the politician's answer starts ("As a proud lizard, I…").
+4. **The politician answers.** They see the opener on their phone and have to finish the sentence, live.
+5. **The hearing.** The TV plays the full answer in the politician's AI-generated voice while the press throws tomatoes, boos and laughs, and the approval meter swings.
+6. **The verdict.** Journalists rate the answer 1–5 stars and the saboteur is revealed. Everyone takes the podium once; most points wins.
+
+The cast is eight cartoon parodies: Donald Frump, Barack O'Banana, Joe Bidet, Hillary Clingfilm, Bernie Sandwiches, Kamala Harrass, George W. Shrub and Abraham Stinkoln.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/tv-lobby.jpg" alt="TV lobby with the QR code to join" /></td>
+    <td width="50%"><img src="docs/screenshots/tv-results.jpg" alt="Final results on the TV" /></td>
+  </tr>
+  <tr>
+    <td align="center">Scan to join</td>
+    <td align="center">Final results</td>
+  </tr>
+</table>
+
+<p>
+  <img src="docs/screenshots/phone-create.jpg" alt="Phone: pick your politician" width="240" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/phone-answer.jpg" alt="Phone: the politician finishes the sabotaged answer" width="240" />
+</p>
+
+Phones: pick your politician, then finish whatever the saboteur put on your teleprompter.
+
+## Team
+
+| | Built |
+|---|---|
+| [Eduard Dehelean](https://github.com/end13s) | Game server, phases and scoring, rooms, bots, the message list |
+| [Finn Murray](https://github.com/finnmurray1) | Front end: TV game screen, phone controller, character creator and the press-room scene |
+| Elijah Brough | Voices, sound effects, music, and game writing (headlines, questions, characters) |
+
+## Stack
+
+One Node.js process (Express + Socket.io) serves the TV page and the phone page. The TV and phone screens are plain HTML, CSS and JavaScript with hand-drawn SVG characters, no build step. Voices come from ElevenLabs text-to-speech, called only from the server. A Cloudflare quick tunnel gives the laptop an HTTPS address phones can reach.
+
+## Run it
 
 ```
 npm install
 cp .env.example .env        # then fill in the values (see below)
-npm run phone-test
+npm start
 cloudflared tunnel --url http://localhost:3000
 ```
+
+Open `<tunnel URL>/tv` on the TV; phones scan the QR code. Playing alone? Press **B** in the lobby to add bots. Add `ROUNDS=1` to `.env` for a one-round demo (default: everyone takes the podium once). Game content (characters, voices, headlines, questions) lives in `content.js`, the message list in [docs/press-conference.md](docs/press-conference.md).
+
+TV shortcuts: **Enter** start, **B** add bot, **N** skip phase, **R** reset, **Esc** exit to menu.
 
 `.env`:
 
 | Variable | What |
 |---|---|
-| `ELEVENLABS_API_KEY` | ElevenLabs API key. Shared privately in the team, never committed |
+| `ELEVENLABS_API_KEY` | ElevenLabs API key. Shared privately in the team, never committed. Without it the game still runs, without live voices |
 | `ELEVENLABS_TEST_VOICE_ID` | Any voice id from the ElevenLabs web app, for the voice test |
 | `PORT` | Defaults to 3000 |
 | `PUBLIC_URL` | The tunnel URL, if the TV page should show it in the QR code while opened on `localhost` |
+| `ROUNDS` | Number of rounds. Defaults to one per player |
 
-## Run the game
-
-```
-npm start
-cloudflared tunnel --url http://localhost:3000
-```
-
-Open `<tunnel URL>/tv` on the TV; phones scan the QR code. Add `ROUNDS=1` to `.env` for a one-round demo (default 3). Game content (characters, voices, questions) lives in `content.js`, the message list in [docs/press-conference.md](docs/press-conference.md).
+Install `cloudflared` once: `winget install --id Cloudflare.cloudflared` (Windows) or `brew install cloudflared` (macOS). No account needed for quick tunnels; the URL changes every time you restart the tunnel.
 
 ## Phone test
 
-A throwaway diagnostic to check real phones before we build anything on top of them.
+A diagnostic we built before the jam to check real phones before building anything on top of them.
 
-1. Install `cloudflared` once: `winget install --id Cloudflare.cloudflared` (Windows) or `brew install cloudflared` (macOS). No account needed for quick tunnels.
-2. `npm run phone-test`
-3. In a second terminal: `cloudflared tunnel --url http://localhost:3000`. It prints a `https://<random>.trycloudflare.com` URL. The URL changes every time you restart the tunnel.
-4. On the laptop, open `http://localhost:3000/results`. Click **Enable audio** if you'll run the voice test.
-5. On each phone, open the tunnel URL. Tap the device name at the top to rename it (e.g. "Ana iPhone 13").
-6. Tap through the tests. Every result shows on the phone and on `/results`, grouped by device. `/results.json` downloads everything.
+1. `npm run phone-test`
+2. In a second terminal: `cloudflared tunnel --url http://localhost:3000`.
+3. On the laptop, open `http://localhost:3000/results`. Click **Enable audio** if you'll run the voice test.
+4. On each phone, open the tunnel URL. Tap the device name at the top to rename it (e.g. "Ana iPhone 13").
+5. Tap through the tests. Every result shows on the phone and on `/results`, grouped by device. `/results.json` downloads everything.
 
 What it checks:
 
@@ -60,9 +99,9 @@ The voice test only appears when `ELEVENLABS_API_KEY` and `ELEVENLABS_TEST_VOICE
 
 ## Docs
 
-- [docs/PLAN.md](docs/PLAN.md): timeline, rules, decision rule, roles, build schedule, demo
-- [docs/team-plan.md](docs/team-plan.md): tonight's goals per person, checkpoints, what to cut
-- [docs/press-conference.md](docs/press-conference.md): concept for a talking theme
-- [docs/one-vessel-one-traitor.md](docs/one-vessel-one-traitor.md): concept for any other theme
+- [docs/press-conference.md](docs/press-conference.md): the game's rules, round loop, scoring and message list
+- [docs/PLAN.md](docs/PLAN.md): jam timeline, rules, roles, build schedule, demo
+- [docs/team-plan.md](docs/team-plan.md): goals per person, checkpoints, what to cut
+- [docs/one-vessel-one-traitor.md](docs/one-vessel-one-traitor.md): the backup concept if the theme hadn't suited a talking game
 - [docs/night-of-checklist.md](docs/night-of-checklist.md): arrival, audio to make, first 15 minutes after the reveal
 - [docs/cheatsheet.md](docs/cheatsheet.md): Phaser + Matter, Socket.io, tilt, wake lock, ElevenLabs snippets
