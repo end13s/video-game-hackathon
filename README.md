@@ -1,6 +1,6 @@
 # Press Conference
 
-**🏆 1st place, Chroma Awards 4H Game Jam** (San Francisco, Oct 28, 2026). Built in one evening by a team of three.
+**🏆 Party Games track winner, Chroma Awards 4H Game Jam** (San Francisco, Oct 28, 2026). Built in one evening by a team of three.
 
 A party game about politics. The game runs on a TV or laptop screen, 2–6 players scan a QR code to join, and their phones become the controllers. One player takes the podium as a cartoon politician; everyone else is the press.
 
