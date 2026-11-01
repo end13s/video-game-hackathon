@@ -45,6 +45,7 @@ socket.on('headline:read', onHeadline);
 socket.on('question:ask', onQuestion);
 socket.on('hearing:line', onHearingLine);
 socket.on('crowd:react', onReact);
+socket.on('slip:show', ({ type }) => playSlip(type));
 
 // ---- join QR ---------------------------------------------------------------
 
@@ -100,7 +101,10 @@ function render(s) {
   if (['question', 'sabotage', 'answer', 'hearing', 'rate'].includes(s.phase)) renderStage(politician, entered);
   if (s.phase === 'hearing' && entered) setApproval(50);
   if (s.phase === 'rate') $('rated').textContent = journalists.filter((p) => p.rated).length;
-  if ((s.phase === 'results' || s.phase === 'final') && entered) renderResults();
+  if ((s.phase === 'results' || s.phase === 'final') && entered) {
+    renderResults();
+    if (s.results?.slip) startReplay(s.results.slip);
+  }
 
   if (entered) setTicker();
 }
@@ -462,11 +466,17 @@ function renderResults() {
   const ratingHtml = politician && rating.count
     ? `<div class="highlight">${face(politician, 'small')}<span><small>Answer rating · +${points[politician.id] || 0}</small><strong>${esc(charName(politician))}</strong><span class="stars">${stars(rating.average)}</span> ${rating.average} / 5</span></div>`
     : '';
+  const slip = state.results?.slip;
+  const names = (ids) => ids.map((id) => esc(playerById(id)?.name || '?')).join(', ');
+  const wolves = Object.entries(state.results?.falseGotchas || {}).map(([id, n]) => `${esc(playerById(id)?.name || '?')} ×${n}`);
+  const slipHtml = slip && politician
+    ? `<div class="highlight">${face(politician, 'small')}<span><small>The slip · ${SLIP_LABEL[slip.type] || ''}</small><strong>${slip.caught.length ? `Caught by ${names(slip.caught)}` : 'Nobody caught it'}</strong>${slip.missed.length} looked away${wolves.length ? ` · Cried wolf: ${wolves.join(', ')}` : ''}</span></div>`
+    : '';
   const saboteur = playerById(state.results?.saboteurId);
   const hackHtml = saboteur
     ? `<div class="highlight">${face(saboteur, 'small')}<span><small>Hacked the teleprompter 😈</small><strong>${esc(saboteur.name)}</strong>“${esc(state.chosen?.opener)}…”</span></div>`
     : '';
-  $('highlights').innerHTML = final ? '' : ratingHtml + bestHtml + hackHtml;
+  $('highlights').innerHTML = final ? '' : ratingHtml + slipHtml + bestHtml + hackHtml;
 
   const ranked = [...state.players].sort((a, b) => b.score - a.score);
   const top = ranked[0]?.score;
@@ -477,11 +487,50 @@ function renderResults() {
       <span class="rank">${i + 1}</span>
       ${face(p, 'small')}
       <span class="who">${esc(p.name)}<small>${esc(charName(p))}</small></span>
-      <span class="delta">${!final && gained ? `+${gained}` : ''}</span>
+      <span class="delta ${gained < 0 ? 'minus' : ''}">${!final && gained ? `${gained > 0 ? '+' : ''}${gained}` : ''}</span>
       <span>${p.score}</span>
     </li>`;
   }).join('');
   cameraFlashes(final ? 8 : 4);
+}
+
+// ---- the slip --------------------------------------------------------------
+
+const SLIP_LABEL = {
+  cash: 'Pocketed the cash 💵',
+  cheat: 'Read the answers off a cheat sheet 📜',
+  duck: 'Released the duck 🦆',
+  bribe: 'Took a briefcase of bribes 💼',
+};
+const SLIP_ART = {
+  cash: '<span>💵</span><span>💵</span><span>💵</span>',
+  cheat: '<div class="note">ANSWERS<br><small>1. deny<br>2. deny<br>3. blame intern</small></div>',
+  duck: '<span>🦆</span>',
+  bribe: '<div class="case">💼<b>BRIBES</b></div>',
+};
+
+// About a second of something shady at the podium. The replay plays it at a third of the speed.
+function playSlip(type, slow = false) {
+  if (!SLIP_ART[type]) return;
+  const el = document.createElement('div');
+  el.className = `slip slip-${type}`;
+  el.innerHTML = SLIP_ART[type];
+  el.style.setProperty('--t', slow ? '3.6s' : '1.2s');
+  // The duck and the cheat sheet come up from behind the lectern.
+  const behind = type === 'duck' || type === 'cheat';
+  $('podium').insertBefore(el, behind ? document.querySelector('#podium .lectern') : null);
+  setTimeout(() => el.remove(), slow ? 4000 : 1400);
+}
+
+// Before the results, the TV replays the slip slowly with who caught it.
+let replayTimer = null;
+function startReplay(slip) {
+  const names = (ids) => ids.map((id) => playerById(id)?.name || '?').join(', ');
+  $('replay-text').textContent = `${SLIP_LABEL[slip.type] || ''} · Caught it: ${names(slip.caught) || 'nobody'}${slip.missed.length ? ` · Looked away: ${names(slip.missed)}` : ''}`;
+  document.body.classList.add('replay');
+  clearTimeout(replayTimer);
+  setTimeout(() => playSlip(slip.type, true), 700);
+  replayTimer = setTimeout(() => document.body.classList.remove('replay'), 5500);
 }
 
 // ---- heckling -------------------------------------------------------------

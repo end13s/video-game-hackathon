@@ -4,7 +4,7 @@
 
 Every round opens with a breaking-news headline about one player's politician, who takes the podium. The others are journalists: they each write a question about the headline on their phone, then vote for the best one (funniest, toughest, whatever they like). The TV reads the winning question in a journalist voice. Then one journalist secretly hacks the teleprompter: they write how the politician's answer starts, and the politician has to finish the sentence. The TV plays the whole answer in the politician's voice while the press heckles (tomatoes, boos, laughs, an approval meter), then the journalists rate it 1–5 stars. The saboteur is revealed at the end of the round. Everyone takes the podium once, then the game is over.
 
-Before the game, everyone picks a politician on their phone from a cast of cartoon parodies of US politicians (Donald Frump, Barack O'Banana, Joe Bidet, JD Pants, Bernie Sandwiches, Kamala Harrass, George Washingmachine, Abraham Stinkoln). Each one can only be picked once. The TV draws that character in the press room: at the podium when it's their turn, and on the floor as a reporter when it isn't.
+Before the game, everyone picks a politician on their phone from a cast of cartoon parodies of US politicians (Donald Frump, Barack O'Llama, Joe Bidet, JD Pants, Bernie Sandwiches, Kamala Harrass, George Washingmachine, Abraham Stinkoln). Each one can only be picked once. The TV draws that character in the press room: at the podium when it's their turn, and on the floor as a reporter when it isn't.
 
 Theme: decides who the politicians are, the headlines, and the look of the room. Elijah writes the characters, outlets, headlines and backup questions in `content.js`.
 

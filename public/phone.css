@@ -91,7 +91,8 @@ body[data-screen="podium"] [data-screen="podium"],
 body[data-screen="pick"] [data-screen="pick"],
 body[data-screen="rate"] [data-screen="rate"],
 body[data-screen="sabotage"] [data-screen="sabotage"],
-body[data-screen="heckle"] [data-screen="heckle"] { display: flex; }
+body[data-screen="heckle"] [data-screen="heckle"],
+body[data-screen="slip"] [data-screen="slip"] { display: flex; }
 section[data-screen="podium"] { justify-content: center; }
 .center { text-align: center; }
 .prompt { margin: 0; font-size: 19px; font-weight: 600; }
@@ -141,3 +142,18 @@ section[data-screen="podium"] { justify-content: center; }
 .heckles button.word { font-size: 17px; letter-spacing: .04em; background: var(--red); }
 .big-heckles button { height: 96px; font-size: 40px; }
 .big-heckles button.word { font-size: 22px; }
+
+.gotcha {
+  min-height: 84px; border: 0; border-radius: 16px; background: var(--gold); color: var(--navy);
+  font: 900 30px/1 system-ui, sans-serif; letter-spacing: .04em; box-shadow: 0 6px 0 #b8891c;
+}
+.gotcha:active { transform: translateY(4px); box-shadow: 0 2px 0 #b8891c; }
+.gotcha:disabled { background: var(--navy-2); color: var(--muted); box-shadow: none; }
+.gotcha-note { margin: -4px 0 6px; font-size: 13px; text-align: center; }
+.slip-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.slip-buttons button {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 104px; border: 0; border-radius: 14px;
+  background: var(--navy-2); color: var(--white); font: 700 15px/1.2 system-ui, sans-serif;
+}
+.slip-buttons button span { font-size: 40px; }
+.slip-buttons button:active { transform: scale(.95); background: #2a3b6e; }

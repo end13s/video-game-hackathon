@@ -43,14 +43,6 @@ body[data-screen="pick"] #room, body[data-screen="results"] #room { filter: brig
   box-shadow: 0 .8rem 1.6rem rgba(0,0,0,.5);
 }
 .seal { position: absolute; left: 50%; top: 7.5rem; width: 11rem; transform: translateX(-50%); filter: drop-shadow(0 .6rem 1rem rgba(0,0,0,.5)); }
-.flag { position: absolute; bottom: 0; width: 6rem; height: 26rem; }
-.flag.left { left: 27rem; }
-.flag.right { right: 27rem; }
-.flag .pole { position: absolute; left: 0; bottom: 0; width: .5rem; height: 100%; border-radius: .3rem; background: linear-gradient(90deg, #8a6510, #fff1a8, #8a6510); }
-.flag .pole::before { content: ''; position: absolute; left: -.45rem; top: -1rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff1a8, #b58717); }
-.flag svg { position: absolute; left: .4rem; top: .5rem; width: 5.4rem; animation: wave 4s ease-in-out infinite alternate; transform-origin: left center; }
-.flag.right svg { animation-delay: -2s; }
-@keyframes wave { to { transform: skewY(2deg) scaleX(.94); } }
 
 .floor {
   position: absolute; left: 0; right: 0; bottom: 0; height: 19rem;
@@ -361,3 +353,62 @@ body[data-phase="hearing"] .meter, body[data-phase="rate"] .meter { display: blo
 @keyframes drip { from { transform: translateY(0); opacity: 1; } to { transform: translateY(3rem); opacity: 0; } }
 #politician.hit svg { animation: flinch .4s ease-out; }
 @keyframes flinch { 30% { transform: translateX(-.8rem) rotate(-4deg); } }
+
+/* ---- the slip ------------------------------------------------------------ */
+/* Drawn inside #podium; --t is how long it lasts (slower in the replay). */
+.slip { position: absolute; left: 50%; bottom: 0; width: 0; height: 0; --t: 1.2s; pointer-events: none; }
+.slip > * { position: absolute; animation: var(--t) ease-in-out both; }
+.slip-cash span { font-size: 3rem; animation-name: stash; }
+.slip-cash span:nth-child(2) { animation-delay: calc(var(--t) * .1); }
+.slip-cash span:nth-child(3) { animation-delay: calc(var(--t) * .2); }
+@keyframes stash {
+  0% { left: 12rem; bottom: 13rem; opacity: 0; transform: translate(-50%, 0) rotate(20deg); }
+  15% { opacity: 1; }
+  75% { left: 1rem; bottom: 14.5rem; opacity: 1; transform: translate(-50%, 0) rotate(-10deg) scale(1); }
+  100% { left: 0; bottom: 14.5rem; opacity: 0; transform: translate(-50%, 0) scale(.2); }
+}
+.slip-cheat .note {
+  left: -3rem; width: 7rem; padding: .4rem .6rem; background: #fffbe8; color: #1b1b1f; border-radius: .2rem;
+  font: 900 1rem/1.15 system-ui, sans-serif; box-shadow: 0 .3rem .6rem rgba(0,0,0,.4); animation-name: peek;
+}
+.slip-cheat .note small { font-weight: 700; font-size: .8rem; }
+@keyframes peek {
+  0%, 100% { bottom: 3rem; transform: translate(-50%, 0) rotate(-8deg); }
+  25%, 75% { bottom: 10rem; transform: translate(-50%, 0) rotate(-4deg); }
+}
+.slip-duck span { left: -8rem; font-size: 7rem; animation-name: duck; }
+@keyframes duck {
+  0%, 100% { bottom: 0; transform: translate(-50%, 0) rotate(0); }
+  25% { bottom: 8rem; transform: translate(-50%, 0) rotate(-12deg); }
+  50% { bottom: 8.5rem; transform: translate(-50%, 0) rotate(10deg); }
+  75% { bottom: 8rem; transform: translate(-50%, 0) rotate(-6deg); }
+}
+.slip-bribe .case { bottom: 9.4rem; display: grid; justify-items: center; font-size: 3.4rem; line-height: 1; animation-name: handover; }
+.slip-bribe .case b { font-size: .9rem; padding: .1rem .4rem; background: #1b1b1f; color: var(--gold); border-radius: .2rem; letter-spacing: .1em; }
+@keyframes handover {
+  0% { left: -16rem; opacity: 0; transform: translate(-50%, 0); }
+  15% { opacity: 1; }
+  45%, 60% { left: 0; opacity: 1; transform: translate(-50%, 0); }
+  100% { left: 16rem; opacity: 0; transform: translate(-50%, 0); }
+}
+
+/* The replay: the room stays clear, with a red ring around the podium. */
+#replay { display: none; position: fixed; inset: 0; z-index: 4; pointer-events: none; }
+body.replay #replay { display: block; }
+body.replay[data-screen="results"] #room { filter: sepia(.35) contrast(1.1); }
+body.replay section[data-screen="results"] { display: none; }
+.replay-tag {
+  position: absolute; left: 50%; top: 7rem; transform: translateX(-50%); margin: 0; padding: .4rem 1.2rem;
+  background: var(--red); border-radius: .3rem; font-weight: 900; font-size: 1.8rem; letter-spacing: .08em; text-transform: uppercase;
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 50% { opacity: .55; } }
+.replay-ring {
+  position: absolute; left: 50%; bottom: 19rem; width: 30rem; height: 26rem; transform: translateX(-50%);
+  border: .5rem solid var(--red); border-radius: 50%; box-shadow: 0 0 2rem rgba(215,38,61,.6);
+  animation: ring .6s ease-out both;
+}
+@keyframes ring { from { transform: translateX(-50%) scale(1.6); opacity: 0; } }
+.replay-caption { position: absolute; left: 50%; bottom: 5rem; transform: translateX(-50%); width: 76rem; }
+.scoreboard .delta.minus { color: #ff6b6b; }
+.replay-caption .lt-text { font-size: 2rem; }

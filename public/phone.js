@@ -137,10 +137,10 @@ function render() {
       if (atPodium) return renderAnswer();
       return look('Eyes on the TV', `${charName(politician)} is writing a dodge…`, '', politician);
     case 'hearing':
-      if (atPodium) return look('You have the floor', '🎤 Your answer is playing', 'Look at the TV. Brace for tomatoes.', me);
+      if (atPodium) return renderSlip(me);
       return show('heckle');
     case 'rate':
-      if (atPodium) return look('The press is rating you', 'How did your dodge land?', '', me);
+      if (atPodium) return renderSlip(me);
       return renderRate();
     case 'results':
     case 'final':
@@ -327,6 +327,45 @@ for (const el of document.querySelectorAll('.heckles')) {
   };
 }
 
+// ---- the slip (politician) and GOTCHA (journalists) -------------------------
+
+const SLIPS = [['cash', '💵', 'Pocket the cash'], ['cheat', '📜', 'Read the cheat sheet'], ['duck', '🦆', 'Release the duck'], ['bribe', '💼', 'Take the bribes']];
+$('slip-buttons').innerHTML = SLIPS.map(([type, icon, label]) => `<button type="button" data-type="${type}"><span>${icon}</span>${label}</button>`).join('');
+
+function renderSlip(me) {
+  if (you.slipped) return look('Done 🤫', 'Did they see it?', 'Find out at the results.', me);
+  show('slip');
+}
+
+$('slip-buttons').onclick = (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  socket.emit('slip:do', { type: btn.dataset.type }, (res) => {
+    $('slip-error').textContent = res?.error || '';
+    if (!res?.error) navigator.vibrate?.(60);
+  });
+};
+
+// Nobody finds out whether they caught it until the results.
+for (const btn of document.querySelectorAll('.gotcha')) {
+  btn.onclick = () => {
+    navigator.vibrate?.(40);
+    socket.emit('crowd:gotcha', {}, (res) => {
+      if (res?.error) return;
+      for (const b of document.querySelectorAll('.gotcha')) {
+        b.textContent = 'Called it 🤫';
+        b.disabled = true;
+      }
+      setTimeout(() => {
+        for (const b of document.querySelectorAll('.gotcha')) {
+          b.textContent = '🫵 GOTCHA!';
+          b.disabled = false;
+        }
+      }, 1500);
+    });
+  };
+}
+
 // ---- exit -----------------------------------------------------------------
 
 // Tap twice: the first tap asks to confirm.
@@ -355,7 +394,7 @@ function resetExit() {
 
 function renderResults(me) {
   const final = state.phase === 'final';
-  const { bestQuestion = null, saboteurId = null, rating = {}, points = {} } = state.results || {};
+  const { bestQuestion = null, saboteurId = null, rating = {}, points = {}, slip = null, falseGotchas = {} } = state.results || {};
   const ranked = [...state.players].sort((a, b) => b.score - a.score);
   const rank = ranked.findIndex((p) => p.id === me.id) + 1;
   const wasPolitician = state.politicianId === me.id;
@@ -370,11 +409,15 @@ function renderResults(me) {
     if (wasPolitician) {
       const n = Math.round(rating.average || 0);
       $('result-rank').textContent = rating.count ? `Your answer: ${'★'.repeat(n)}${'☆'.repeat(5 - n)} (${rating.average})` : 'Nobody rated you';
+      if (slip) $('result-rank').textContent += ` · ${slip.missed.length} missed your slip`;
     } else {
       $('result-rank').textContent = bestQuestion === me.id ? 'Your question won!' : 'Your question wasn\'t picked';
       if (saboteurId === me.id) $('result-rank').textContent += ' · You hacked the teleprompter 😈';
+      if (slip) $('result-rank').textContent += slip.caught.includes(me.id) ? ' · You caught the slip! 🫵' : ' · You missed the slip 👀';
+      if (falseGotchas[me.id]) $('result-rank').textContent += ` · ${falseGotchas[me.id]} false GOTCHA`;
     }
-    $('result-score').textContent = `+${points[me.id] || 0} this round · ${me.score} points · #${rank}`;
+    const gained = points[me.id] || 0;
+    $('result-score').textContent = `${gained < 0 ? '' : '+'}${gained} this round · ${me.score} points · #${rank}`;
   }
   if (rank === 1 && final) navigator.vibrate?.([80, 60, 80]);
   show('results');

@@ -46,6 +46,15 @@ const MAX_ANSWER = 200;
 const MAX_OPENER = 90;
 const REACT_GAP_MS = 400; // per player, so nobody floods the room
 const REACTIONS = ['laugh', 'applause', 'gasp', 'boo', 'tomato', 'liar'];
+// The slip: the politician secretly does one of these on the TV, and journalists who
+// were watching (not looking at their phones) hit GOTCHA in time.
+const SLIPS = ['cash', 'cheat', 'duck', 'bribe'];
+const GOTCHA_WINDOW_MS = 2500; // a GOTCHA counts this long after the slip
+const GOTCHA_GAP_MS = 1500; // per player, so spamming it costs points
+const GOTCHA_POINTS = 150;
+const FALSE_GOTCHA_POINTS = 50; // lost for each GOTCHA when nothing happened
+const SLIP_POINTS = 100; // politician, for each journalist who missed it
+const REPLAY_MS = 6000; // results stay up longer when the TV replays a slip
 const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316'];
 const BOT_NAMES = content.botNames || ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'];
 
@@ -188,6 +197,8 @@ class Room {
     this.chosen = null; // { journalistId, question, opener, answer } the question that gets asked
     this.saboteurId = null; // the journalist writing the teleprompter this round
     this.ratings = new Map(); // journalistId -> 1..5 stars for the answer
+    this.slip = null; // { type, at } the politician's slip this round
+    this.gotchas = new Map(); // journalistId -> { caught, misses, last }
     this.results = null;
     this.endsAt = null; // only for phases with a visible countdown
     this.timer = null;
@@ -269,6 +280,7 @@ class Room {
       role,
       question: this.asks.get(playerId) || null,
       saboteur: this.phase === 'sabotage' && playerId === this.saboteurId,
+      slipped: playerId === this.politicianId && Boolean(this.slip),
       votes: { question: this.questionVotes.get(playerId) || null, stars: this.ratings.get(playerId) || null },
     };
   }
@@ -316,7 +328,8 @@ class Room {
     const journalists = this.activeJournalists();
     if (this.phase === 'ask' && journalists.every((p) => this.asks.has(p.id))) this.closeAsks();
     else if (this.phase === 'pick' && journalists.every((p) => this.questionVotes.has(p.id) || !this.canPick(p.id))) this.closePick();
-    else if (this.phase === 'rate' && journalists.every((p) => this.ratings.has(p.id))) this.finishRound();
+    // Rating also waits for the slip (or the timer): the politician wants the press looking down.
+    else if (this.phase === 'rate' && this.slip && journalists.every((p) => this.ratings.has(p.id))) this.finishRound();
   }
 
   // ---- phases ----
@@ -364,6 +377,8 @@ class Room {
     this.chosen = null;
     this.pickTally = null;
     this.saboteurId = null;
+    this.slip = null;
+    this.gotchas.clear();
     this.results = null;
     this.setPhase('ask', { timerMs: ASK_MS, visible: true, onTimeout: () => this.closeAsks() });
     this.sendYouAll();
@@ -513,13 +528,36 @@ class Room {
   }
 
   finishRound() {
+    // A slip just happened: give the press the rest of their time to catch it.
+    const wait = this.slip ? this.slip.at + GOTCHA_WINDOW_MS - Date.now() : 0;
+    if (wait > 0) {
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.finishRound(), wait);
+      return;
+    }
+
     const points = {};
+    const add = (id, n) => (points[id] = (points[id] || 0) + n);
     const author = this.chosen?.journalistId;
-    if (author && this.players.has(author)) points[author] = BEST_QUESTION_POINTS;
+    if (author && this.players.has(author)) add(author, BEST_QUESTION_POINTS);
 
     const stars = [...this.ratings.values()];
     const average = stars.length ? stars.reduce((a, b) => a + b, 0) / stars.length : 0;
-    if (stars.length) points[this.politicianId] = Math.round(average * POINTS_PER_STAR);
+    if (stars.length) add(this.politicianId, Math.round(average * POINTS_PER_STAR));
+
+    const caught = [];
+    const missed = [];
+    for (const p of this.activeJournalists()) (this.gotchas.get(p.id)?.caught ? caught : missed).push(p.id);
+    if (this.slip) {
+      for (const id of caught) add(id, GOTCHA_POINTS);
+      if (missed.length) add(this.politicianId, missed.length * SLIP_POINTS);
+    }
+    const falseGotchas = {};
+    for (const [id, g] of this.gotchas) {
+      if (!g.misses) continue;
+      falseGotchas[id] = g.misses;
+      add(id, -g.misses * FALSE_GOTCHA_POINTS);
+    }
 
     for (const [id, n] of Object.entries(points)) {
       const p = this.players.get(id);
@@ -530,11 +568,13 @@ class Room {
       saboteurId: this.saboteurId,
       questionVotes: this.pickTally || {},
       rating: { average: Math.round(average * 10) / 10, count: stars.length },
+      slip: this.slip ? { type: this.slip.type, caught, missed } : null,
+      falseGotchas,
       points,
     };
 
     if (this.round >= this.totalRounds) this.setPhase('final');
-    else this.setPhase('results', { timerMs: RESULTS_MS, visible: true, onTimeout: () => this.nextRound() });
+    else this.setPhase('results', { timerMs: RESULTS_MS + (this.slip ? REPLAY_MS : 0), visible: true, onTimeout: () => this.nextRound() });
   }
 
   skipPhase() {
@@ -548,8 +588,9 @@ class Room {
   reset() {
     clearTimeout(this.timer);
     for (const p of this.players.values()) p.score = 0;
-    Object.assign(this, { round: 0, totalRounds: 0, politicianId: null, headline: null, chosen: null, saboteurId: null, results: null, endsAt: null, timer: null });
+    Object.assign(this, { round: 0, totalRounds: 0, politicianId: null, headline: null, chosen: null, saboteurId: null, slip: null, results: null, endsAt: null, timer: null });
     this.asks.clear();
+    this.gotchas.clear();
     this.questionVotes.clear();
     this.ratings.clear();
     this.setPhase('lobby');
@@ -646,6 +687,11 @@ class Room {
         const phase = this.phase;
         for (let i = 0; i < 3; i++) setTimeout(() => still(phase) && this.react(bot.id, pick(REACTIONS)), randomMs(800, 7000));
       }
+      // A politician bot slips once, partway through the answer or the rating.
+      if ((this.phase === 'hearing' || this.phase === 'rate') && atPodium && !this.slip) {
+        const phase = this.phase;
+        setTimeout(() => still(phase) && !this.slip && this.doSlip(bot.id, pick(SLIPS)), randomMs(1500, 6000));
+      }
       if (this.phase === 'answer' && atPodium) {
         setTimeout(() => still('answer') && this.submitAnswer(bot.id, pick(content.botAnswers)), randomMs(3000, 8000));
       }
@@ -664,6 +710,39 @@ class Room {
     if (Date.now() - (p.lastReact || 0) < REACT_GAP_MS) return { error: 'Slow down' };
     p.lastReact = Date.now();
     this.emit('crowd:react', { playerId, type });
+    return { ok: true };
+  }
+
+  // The politician secretly does something shady on the TV, once a round, while the answer
+  // plays or is rated. Only the TV is told, so the press has to be watching to see it.
+  doSlip(playerId, type) {
+    if (!['hearing', 'rate'].includes(this.phase)) return { error: 'Not now' };
+    if (playerId !== this.politicianId) return { error: "You're not at the podium" };
+    if (this.slip) return { error: 'You already slipped this round' };
+    if (!SLIPS.includes(type)) return { error: 'Unknown slip' };
+    this.slip = { type, at: Date.now() };
+    if (this.phase === 'rate') setTimeout(() => this.phase === 'rate' && this.checkAllIn(), 0);
+    io.to(`${this.code}:tv`).emit('slip:show', { round: this.round, type });
+    this.sendYou(playerId);
+    // Bots catch it about half the time.
+    for (const bot of this.activeJournalists().filter((p) => p.bot)) {
+      if (Math.random() < 0.5) setTimeout(() => this.gotcha(bot.id), randomMs(600, 2200));
+    }
+    return { ok: true };
+  }
+
+  // A journalist thinks they saw the slip. Whether they caught it stays secret until the
+  // results, so nobody can copy the first one to call it.
+  gotcha(playerId) {
+    if (!['hearing', 'rate'].includes(this.phase)) return { error: 'Not now' };
+    if (playerId === this.politicianId) return { error: "You're at the podium" };
+    const g = this.gotchas.get(playerId) || { caught: false, misses: 0, last: 0 };
+    if (g.caught) return { ok: true };
+    if (Date.now() - g.last < GOTCHA_GAP_MS) return { error: 'Slow down' };
+    g.last = Date.now();
+    if (this.slip && g.last - this.slip.at <= GOTCHA_WINDOW_MS) g.caught = true;
+    else g.misses++;
+    this.gotchas.set(playerId, g);
     return { ok: true };
   }
 
@@ -733,6 +812,7 @@ io.on('connection', (socket) => {
     socket.data.roomCode = r.code;
     socket.data.tv = true;
     socket.join(r.code);
+    socket.join(`${r.code}:tv`);
     ack({ roomCode: r.code, state: r.publicState() });
   });
 
@@ -775,6 +855,8 @@ io.on('connection', (socket) => {
   playerAction('answer:rate', (r, id, { stars }) => r.rateAnswer(id, stars));
   playerAction('opener:submit', (r, id, { text }) => r.submitOpener(id, text));
   playerAction('crowd:react', (r, id, { type }) => r.react(id, type));
+  playerAction('slip:do', (r, id, { type }) => r.doSlip(id, type));
+  playerAction('crowd:gotcha', (r, id) => r.gotcha(id));
   playerAction('player:leave', (r, id) => {
     socket.leave(`${r.code}:${id}`);
     socket.data.playerId = null;

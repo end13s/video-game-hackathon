@@ -107,6 +107,8 @@
 
     <section data-screen="rate">
       <p class="kicker">Rate the answer</p>
+      <button class="gotcha" type="button">🫵 GOTCHA!</button>
+      <p class="muted gotcha-note">Saw something shady on the TV? Hit it within 2 seconds. Wrong: −50.</p>
       <p class="quote" id="rate-answer"></p>
       <div id="stars" class="stars"></div>
       <p id="rate-error" class="error"></p>
@@ -116,9 +118,19 @@
     </section>
 
     <section data-screen="heckle">
+      <p class="kicker">Don't look away 👀</p>
+      <button class="gotcha" type="button">🫵 GOTCHA!</button>
+      <p class="muted gotcha-note">Saw something shady on the TV? Hit it within 2 seconds. Wrong: −50.</p>
       <p class="kicker">Heckle the politician!</p>
-      <p class="muted">Every tap shows up on the TV.</p>
       <div class="heckles big-heckles"></div>
+    </section>
+
+    <section data-screen="slip">
+      <p class="kicker">🤫 Slip up</p>
+      <p class="prompt">Do something shady on the TV while they're looking at their phones.</p>
+      <div id="slip-buttons" class="slip-buttons"></div>
+      <p class="muted">Once a round. +100 for every journalist who misses it, but anyone who hits GOTCHA in time catches you.</p>
+      <p id="slip-error" class="error"></p>
     </section>
 
     <section data-screen="results">
