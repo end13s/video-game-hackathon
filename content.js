@@ -10,20 +10,70 @@ const path = require('path');
 const crypto = require('crypto');
 
 const content = {
-  anchor: { name: 'Dale Brightwater', voiceId: 'nPczCjzI2devNBz1zQrb', voice: { gender: 'male', age: 'middle_aged', words: ['news', 'narrat', 'deep', 'confident', 'broadcast'] } },
+  anchor: {
+    name: 'Dale Brightwater',
+    voiceId: 'nPczCjzI2devNBz1zQrb',
+    voice: { gender: 'male', age: 'middle_aged', words: ['news', 'narrat', 'deep', 'confident', 'broadcast'] },
+    // What the anchor says after each answer and at the end. One sentence each, so a verdict and
+    // a credit make two. {name} is the politician, square brackets are ElevenLabs audio tags.
+    lines: {
+      disaster: [
+        '[sighs] Historians will study that answer from {name}, mostly as a warning.',
+        'That answer from {name} just polled worse than a tax on soup.',
+        "[laughs] Somewhere, {name}'s campaign manager is quietly updating a resume.",
+        '[sighs] We have lost contact with the career of {name}.',
+      ],
+      poor: [
+        '[sighs] Oof, {name} did not dodge that one.',
+        'The press room is not buying it, {name}.',
+        'That answer from {name} landed like a wet handshake.',
+        '[laughs] That answer from {name} will be on every front page tomorrow.',
+      ],
+      shrug: [
+        'Well, {name} definitely said some words.',
+        'Sources confirm {name} answered, and that is all sources can confirm.',
+        'The room shrugged at {name}, and frankly so did I.',
+      ],
+      good: [
+        '[excited] Well, well, well, {name} survives this one!',
+        '[laughs] {name}, somehow, gets away with it!',
+        'Against all legal advice, that answer from {name} actually worked.',
+        'The press room is smiling at {name}, which cannot be good for anyone.',
+      ],
+      triumph: [
+        '[excited] A stunning performance from {name}, and the press room is in tears!',
+        "That answer from {name} just won four states that weren't voting.",
+        '[laughs] Put {name} on the money, because that was magnificent!',
+      ],
+      noReactions: [
+        '[sighs] Not a single reaction, democracy is tired tonight.',
+        'Total silence in the press room, and {name} will call that a win.',
+      ],
+      creditAsker: ['{asker} teed that one up perfectly.', 'Credit to {asker} for the setup.'],
+      creditSaboteur: ['And {saboteur} hacked the teleprompter.', 'The teleprompter, by the way, was hacked by {saboteur}.'],
+      creditBoth: ['{asker} teed that one up, and {saboteur} hacked the teleprompter.'],
+      creditSame: ['{asker} wrote the question and hacked the teleprompter.'],
+      final: [
+        '[excited] Ladies and gentlemen, your new leader of the free world... {name}! God help us all.',
+        'The votes are in, the scandals are out. {name} wins the press conference!',
+      ],
+      finalTie: [
+        '[excited] We have a tie, so {names} will now share one very small office.',
+        'The votes are in, the scandals are out, and {names} are tied for the win!',
+      ],
+    },
+  },
 
-  // Players pick one of these in the lobby (bots get a free one). Cartoon parodies of real
-  // politicians with made-up names; the voices are stock ElevenLabs voices, not imitations.
-  // look: how avatar.js draws them (hair, extra and mouth are names from avatar.js; extra can be a list).
+  // Each player gets one of these voices. Stock ElevenLabs voices, chosen by the voice description.
   politicians: [
-    { id: 'trump', name: 'Donald Frump', title: 'The Dealmaker', look: { skin: '#f2a65e', hair: 'Swoop', hairColor: '#f0c75a', suit: '#1e2a4a', tie: '#d7263d', extra: 'Tan lines', mouth: 'Pout' }, voiceId: 'CwhRBWXzGAHq8TQ4Fs17', voice: { gender: 'male', age: 'middle_aged', words: ['american', 'confident', 'casual', 'deep'] } },
-    { id: 'obama', name: "Barack O'Llama", title: 'Former President, still has jokes', look: { skin: '#8a5a3c', hair: 'Buzz', hairColor: '#4a4542', suit: '#3a3f4b', tie: '#3b82f6', extra: 'None', ears: 'Big', mouth: 'Grin' }, voiceId: '', voice: { gender: 'male', age: 'middle_aged', words: ['calm', 'smooth', 'warm', 'deep'] } },
-    { id: 'biden', name: 'Joe Bidet', title: 'Former President, aviator enthusiast', look: { skin: '#f6d3b8', hair: 'Combed', hairColor: '#ececec', suit: '#1e2a4a', tie: '#2a5ab8', extra: 'Aviators', mouth: 'Grin' }, voiceId: 'pqHfZKP75CvOlQylNhV4', voice: { gender: 'male', age: 'old', words: ['deep', 'raspy', 'gravel', 'authorit'] } },
-    { id: 'vance', name: 'JD Pants', title: 'Vice President, professional sidekick', look: { skin: '#f3cdb2', hair: 'Side part', hairColor: '#3a2a1e', suit: '#1e2a4a', tie: '#d7263d', extra: 'Beard', mouth: 'Smile' }, voiceId: 'TX3LPaxmHKxFdv7VOQHJ', voice: { gender: 'male', age: 'young', words: ['casual', 'energetic', 'friendly', 'american'] } },
-    { id: 'bernie', name: 'Bernie Sandwiches', title: 'Senator, once again asking', look: { skin: '#f3c9b0', hair: 'Tufts', hairColor: '#f2f2f2', suit: '#5a5f69', tie: '#3a3f4b', extra: 'Glasses', mouth: 'Shouting' }, voiceId: '', voice: { gender: 'male', age: 'old', words: ['raspy', 'gravel', 'loud', 'grump'] } },
-    { id: 'kamala', name: 'Kamala Harrass', title: 'Former Vice President', look: { skin: '#a8714a', hair: 'Bob', hairColor: '#2a1d17', suit: '#1b1f2a', tie: 'none', extra: 'Pearls', mouth: 'Grin' }, voiceId: 'Xb7hH8MSUJpSbSDYk0k2', voice: { gender: 'female', age: 'middle_aged', words: ['crisp', 'confident', 'professional', 'clear'] } },
-    { id: 'washington', name: 'George Washingmachine', title: '1st President, cannot tell a lie', look: { skin: '#f3d2b8', hair: 'Wig', hairColor: '#f1efea', suit: '#1e2a4a', tie: '#f5f5f5', extra: 'None', mouth: 'Smirk' }, voiceId: '', voice: { gender: 'male', age: 'old', words: ['british', 'deep', 'authorit', 'calm'] } },
-    { id: 'lincoln', name: 'Abraham Stinkoln', title: '16th President, honest (allegedly)', look: { skin: '#e2b48c', hair: 'Short', hairColor: '#1f1a17', suit: '#141418', tie: '#141418', extra: 'Lincoln', mouth: 'Smirk' }, voiceId: '', voice: { gender: 'male', age: 'old', words: ['deep', 'wise', 'narrat', 'calm'] } },
+    { id: 'p1', name: 'Politician voice 1', voiceId: 'CwhRBWXzGAHq8TQ4Fs17', voice: { gender: 'male', age: 'middle_aged', words: ['american', 'confident', 'casual', 'deep'] } },
+    { id: 'p2', name: 'Politician voice 2', voiceId: '', voice: { gender: 'male', age: 'middle_aged', words: ['calm', 'smooth', 'warm', 'deep'] } },
+    { id: 'p3', name: 'Politician voice 3', voiceId: 'pqHfZKP75CvOlQylNhV4', voice: { gender: 'male', age: 'old', words: ['deep', 'raspy', 'gravel', 'authorit'] } },
+    { id: 'p4', name: 'Politician voice 4', voiceId: 'TX3LPaxmHKxFdv7VOQHJ', voice: { gender: 'male', age: 'young', words: ['casual', 'energetic', 'friendly', 'american'] } },
+    { id: 'p5', name: 'Politician voice 5', voiceId: '', voice: { gender: 'male', age: 'old', words: ['raspy', 'gravel', 'loud', 'grump'] } },
+    { id: 'p6', name: 'Politician voice 6', voiceId: 'Xb7hH8MSUJpSbSDYk0k2', voice: { gender: 'female', age: 'middle_aged', words: ['crisp', 'confident', 'professional', 'clear'] } },
+    { id: 'p7', name: 'Politician voice 7', voiceId: '', voice: { gender: 'male', age: 'old', words: ['british', 'deep', 'authorit', 'calm'] } },
+    { id: 'p8', name: 'Politician voice 8', voiceId: '', voice: { gender: 'male', age: 'old', words: ['deep', 'wise', 'narrat', 'calm'] } },
   ],
 
   // Each player also gets one of these for the rounds they're a journalist: their outlet,

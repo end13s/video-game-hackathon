@@ -5,7 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0b1530">
   <title>Press Conference</title>
-  <link rel="icon" href="data:,">
+  <meta name="description" content="A party game about politics. One player takes the podium, the rest are the press.">
+  <meta property="og:title" content="Press Conference">
+  <meta property="og:description" content="A party game about politics. One player takes the podium, the rest are the press.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Anton&family=Barlow+Condensed:wght@500;600;700;800&family=Courier+Prime:wght@700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/phone.css">
 </head>
 <body data-screen="join">
@@ -20,17 +26,36 @@
     <section data-screen="join">
       <h1 class="title">Press<br>Conference</h1>
       <form id="join-form">
+        <input id="room-code" class="hidden" maxlength="4" placeholder="Room code" aria-label="Room code" autocomplete="off" autocapitalize="characters">
         <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" autocapitalize="words" enterkeyhint="go">
         <button class="big" type="submit">Join</button>
       </form>
       <p id="join-error" class="error"></p>
+      <a id="host-link" class="host-link hidden" href="/tv">Host a game on this screen</a>
     </section>
 
     <section data-screen="create">
-      <p class="kicker">Pick your politician</p>
-      <div id="char-list" class="char-list"></div>
-      <p id="char-error" class="error"></p>
-      <p class="muted center">The host starts the game on the TV.</p>
+      <div class="pick-preview">
+        <img id="pick-img" alt="">
+        <span id="pick-who" class="pick-who"></span>
+      </div>
+      <div class="pick-panel">
+        <div class="pick-head">
+          <h1 id="pick-title"></h1>
+          <span id="pick-step"></span>
+        </div>
+        <p id="pick-rule" class="pick-note"></p>
+        <form id="pick-name-form" class="hidden">
+          <input id="pick-name" maxlength="16" placeholder="your name" aria-label="Your name" autocomplete="off" autocapitalize="words" enterkeyhint="done">
+        </form>
+        <div id="pick-tiles" class="pick-tiles"></div>
+        <dl id="pick-summary" class="pick-summary hidden"></dl>
+        <p id="char-error" class="error"></p>
+        <div class="pick-nav">
+          <button id="pick-back" class="ghost" type="button">back</button>
+          <button id="pick-next" class="big" type="button">next</button>
+        </div>
+      </div>
     </section>
 
     <section data-screen="look">
@@ -60,6 +85,13 @@
       </div>
     </section>
 
+    <section data-screen="breaking">
+      <p class="kicker">Breaking news</p>
+      <p class="headline"></p>
+      <p id="breaking-text" class="prompt"></p>
+      <p id="breaking-sub" class="muted"></p>
+    </section>
+
     <section data-screen="podium">
       <p class="kicker">You're at the podium · Breaking news</p>
       <p class="headline"></p>
@@ -85,7 +117,7 @@
           <span id="opener-count" class="muted">0 / 90</span>
           <button class="big" type="submit">Hack it</button>
         </div>
-        <p class="muted">They have to finish your sentence, live. Nobody finds out it was you until the results.</p>
+        <p class="muted">They have to finish your sentence, live. The anchor names you on air afterwards.</p>
         <p id="sabotage-error" class="error"></p>
       </form>
     </section>
@@ -105,44 +137,21 @@
       </form>
     </section>
 
-    <section data-screen="rate">
-      <p class="kicker">Rate the answer</p>
-      <button class="gotcha" type="button">🫵 GOTCHA!</button>
-      <p class="muted gotcha-note">Saw something shady on the TV? Hit it within 2 seconds. Wrong: −50.</p>
-      <p class="quote" id="rate-answer"></p>
-      <div id="stars" class="stars"></div>
-      <p id="rate-error" class="error"></p>
-      <p id="rate-done" class="muted center hidden">Rating in! You can still change it.</p>
-      <p class="kicker heckle-title">Heckle</p>
-      <div class="heckles"></div>
-    </section>
-
     <section data-screen="heckle">
-      <p class="kicker">Don't look away 👀</p>
-      <button class="gotcha" type="button">🫵 GOTCHA!</button>
-      <p class="muted gotcha-note">Saw something shady on the TV? Hit it within 2 seconds. Wrong: −50.</p>
-      <p class="kicker">Heckle the politician!</p>
+      <p class="kicker">React to the answer!</p>
       <div class="heckles big-heckles"></div>
+      <p id="reactions-left" class="muted center"></p>
     </section>
 
-    <section data-screen="slip">
-      <p class="kicker">🤫 Slip up</p>
-      <p class="prompt">Do something shady on the TV while they're looking at their phones.</p>
-      <div id="slip-buttons" class="slip-buttons"></div>
-      <p class="muted">Once a round. +100 for every journalist who misses it, but anyone who hits GOTCHA in time catches you.</p>
-      <p id="slip-error" class="error"></p>
-    </section>
-
-    <section data-screen="results">
+    <section data-screen="final">
       <div id="result-avatar" class="avatar-mid"></div>
-      <p class="kicker" id="result-kicker">Results</p>
+      <p class="kicker">Final results</p>
       <p id="result-rank" class="look-text"></p>
       <p id="result-score" class="muted"></p>
     </section>
   </main>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/avatar.js"></script>
   <script src="/phone.js"></script>
 </body>
 </html>

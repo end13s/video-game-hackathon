@@ -3,11 +3,13 @@
 // Each round one player is the politician at the podium. The others are journalists:
 // they write questions about the round's headline and vote for the best one. One of them
 // secretly writes how the politician's answer starts (the teleprompter), the politician
-// finishes it, and the press heckles and rates the result.
+// finishes it, and the press reacts. The reactions set the politician's approval, and the news
+// anchor delivers the verdict. All the scoring exists to reward funny answers.
 // Message list: docs/press-conference.md
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
 
+const crypto = require('crypto');
 const http = require('http');
 const express = require('express');
 const QRCode = require('qrcode');
@@ -21,6 +23,10 @@ const API_KEY = process.env.ELEVENLABS_API_KEY || '';
 const DEFAULT_VOICE_ID = process.env.ELEVENLABS_TEST_VOICE_ID || '';
 // https://elevenlabs.io/docs/overview/models
 const TTS_MODEL = process.env.ELEVENLABS_MODEL_ID || 'eleven_v4_turbo';
+const ANCHOR_VOICE_ID = content.anchor.voiceId || DEFAULT_VOICE_ID;
+// The site is public and voices cost money, so stop speaking past this many characters a day.
+// A four-player game uses about 2,500. The game carries on with subtitles only.
+const TTS_DAILY_CHARS = Number(process.env.TTS_DAILY_CHARS) || 50000;
 
 // Without ROUNDS, everyone takes the podium once.
 const ROUNDS = Number(process.env.ROUNDS) || 0;
@@ -28,16 +34,21 @@ const ASK_MS = 40000;
 const PICK_MS = 20000;
 const SABOTAGE_MS = 25000;
 const ANSWER_MS = 45000;
-const RATE_MS = 20000;
-const RESULTS_MS = 10000;
+const REACTION_WINDOW_MS = 6000; // the press can still react this long after the line ends
+const MAX_HEADLINE_MS = 14000;
+const MAX_VERDICT_MS = 16000;
+const HEADLINE_PAD_MS = 1000; // a beat on the anchor before the cut back to the press room
 const MAX_QUESTION_MS = 20000;
 const MAX_LINE_MS = 25000;
 const LOBBY_DROP_MS = 30000; // forget players who leave the lobby and don't come back
 const GRACE_MS = 15000; // a refresh or network blip doesn't count as leaving the round
 const EMPTY_ROOM_MS = 10 * 60 * 1000; // delete rooms nobody has been in for this long
 const MAX_ROOMS = 30;
-const BEST_QUESTION_POINTS = 200; // the journalist whose question was picked
-const POINTS_PER_STAR = 100; // politician: average rating times this
+const START_APPROVAL = 50;
+const SWEAT_BELOW = 35; // approval at which the politician starts sweating
+const REACTIONS_PER_ANSWER = 6; // per journalist
+const VOTE_POINTS = 10; // a journalist's question gets a vote in the pick
+const SETUP_SHARE = 0.5; // the asker's share of the approval above the start, so the podium stays the main way to win
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 6;
 const MAX_NAME = 16;
@@ -45,29 +56,37 @@ const MAX_QUESTION = 160;
 const MAX_ANSWER = 200;
 const MAX_OPENER = 90;
 const REACT_GAP_MS = 400; // per player, so nobody floods the room
-const REACTIONS = ['laugh', 'applause', 'gasp', 'boo', 'tomato', 'liar'];
-// The slip: the politician secretly does one of these on the TV, and journalists who
-// were watching (not looking at their phones) hit GOTCHA in time.
-const SLIPS = ['cash', 'cheat', 'duck', 'bribe'];
-const GOTCHA_WINDOW_MS = 2500; // a GOTCHA counts this long after the slip
-const GOTCHA_GAP_MS = 1500; // per player, so spamming it costs points
-const GOTCHA_POINTS = 150;
-const FALSE_GOTCHA_POINTS = 50; // lost for each GOTCHA when nothing happened
-const SLIP_POINTS = 100; // politician, for each journalist who missed it
-const REPLAY_MS = 6000; // results stay up longer when the TV replays a slip
+const POSITIVE_REACTIONS = ['laugh', 'applause', 'cheer'];
+const NEGATIVE_REACTIONS = ['boo', 'tomato', 'liar'];
+const REACTIONS = [...POSITIVE_REACTIONS, ...NEGATIVE_REACTIONS];
 const COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316'];
 const BOT_NAMES = content.botNames || ['Ada', 'Bruno', 'Chen', 'Dara', 'Emil', 'Fay'];
+const MEDIA_FILE = /\.(webp|png|jpe?g|mp3)$/;
+// Players build their politician from these on their phone. The number of options per item
+// matches the number of players, up to the art we have: public/avatars/{suit}-{face}-{hair}.webp.
+const AVATAR_OPTIONS = {
+  suit: ['blue', 'red', 'green', 'gold'],
+  face: ['glasses', 'shades', 'moustache', 'beard'],
+  hair: ['short', 'curly', 'long', 'bun'],
+};
+const AVATAR_ITEMS = Object.keys(AVATAR_OPTIONS);
+const MAX_AVATAR_OPTIONS = 4;
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { maxHttpBufferSize: 16 * 1024 }); // every message is a few hundred characters
 
-app.use(express.json({ limit: '10kb' }));
-app.use('/lib/phaser', express.static(path.join(__dirname, 'node_modules', 'phaser', 'dist')));
-app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+app.disable('x-powered-by');
+app.use(express.static(path.join(__dirname, 'public'), {
+  index: false,
+  setHeaders: (res, file) => {
+    if (MEDIA_FILE.test(file)) res.setHeader('Cache-Control', 'public, max-age=86400');
+  },
+}));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'phone.html')));
 app.get('/tv', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
-app.get('/config', (req, res) => res.json({ publicUrl: PUBLIC_URL, voiceEnabled: Boolean(API_KEY) }));
+app.get('/healthz', (req, res) => res.send('ok'));
+app.get('/config', (req, res) => res.json({ publicUrl: PUBLIC_URL }));
 app.get('/speech/:id', tts.serveSpeech);
 
 app.get('/qr.svg', async (req, res) => {
@@ -78,33 +97,24 @@ app.get('/qr.svg', async (req, res) => {
 
 // ---- text-to-speech ---------------------------------------------------------
 
-function voiceIdFor(key) {
-  if (key === 'anchor') return content.anchor.voiceId || DEFAULT_VOICE_ID;
-  const who = [...content.politicians, ...content.journalists].find((c) => c.id === key);
-  if (!who) return null;
-  return who.voiceId || DEFAULT_VOICE_ID;
-}
+let ttsDay = '';
+let ttsChars = 0;
 
-// Starts generating right away and returns the URL the TV streams it from, or null without a key.
+// Starts generating right away and returns the URL the TV streams it from, or null without a key
+// or past the daily limit.
 function speak(text, voiceId) {
   if (!API_KEY || !voiceId) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== ttsDay) [ttsDay, ttsChars] = [today, 0];
+  if (ttsChars + text.length > TTS_DAILY_CHARS) {
+    console.warn(`Voice limit reached (${TTS_DAILY_CHARS} characters today), skipping speech`);
+    return null;
+  }
+  ttsChars += text.length;
   const job = tts.startSpeech({ apiKey: API_KEY, voiceId, modelId: TTS_MODEL, text });
   return `/speech/${job.id}`;
 }
 
-// The link is public, so cap what the open endpoint can spend.
-let speakCount = 0;
-setInterval(() => (speakCount = 0), 60 * 1000).unref();
-
-app.post('/api/speak', (req, res) => {
-  if (!API_KEY) return res.status(503).json({ error: 'ELEVENLABS_API_KEY is not set' });
-  const text = String(req.body?.text || '').trim().slice(0, 300);
-  const voiceId = voiceIdFor(String(req.body?.voice || 'anchor'));
-  if (!text) return res.status(400).json({ error: 'Missing text' });
-  if (!voiceId) return res.status(400).json({ error: 'Unknown voice' });
-  if (++speakCount > 60) return res.status(429).json({ error: 'Too many speak requests, try again in a minute' });
-  res.json({ url: speak(text, voiceId) });
-});
 
 // ---- helpers ------------------------------------------------------------------
 
@@ -155,15 +165,28 @@ function joinSentence(start, end) {
   return `${start} ${end}`.replace(/\s+/g, ' ').trim();
 }
 
-const cleanName = (name) => String(name || '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME) || 'Player';
+// Names are read aloud too, so square brackets (voice tags) go along with control characters.
+const cleanName = (name) => [...String(name || '').replace(/[\[\]\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()].slice(0, MAX_NAME).join('').trim();
 const cleanText = (text, max) => String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
-const characterOf = (characterId) => content.politicians.find((c) => c.id === characterId);
+// What a player is called on screen and in headlines. characterId only picks their voice now.
+const stageName = (p) => p.name.replace(/ \(bot\)$/, '');
+const characterInfo = (p) => ({ id: p.characterId, name: stageName(p), title: '' });
 
-function characterInfo(characterId) {
-  const c = characterOf(characterId);
-  return c ? { id: c.id, name: c.name, title: c.title } : null;
+// The anchor's verdict: which band of content.anchor.lines an approval falls in.
+function verdictBand(approval) {
+  if (approval < 30) return 'disaster';
+  if (approval < 45) return 'poor';
+  if (approval <= 55) return 'shrug';
+  if (approval < 75) return 'good';
+  return 'triumph';
 }
+
+const fillLine = (line, names) => line.replace(/\{(\w+)\}/g, (m, key) => names[key] ?? m);
+// "Ada", "Ada and Bruno", "Ada, Bruno and Chen".
+const listNames = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+
+const avatarUrl = ({ suit, face, hair }) => `/avatars/${suit}-${face}-${hair}.webp`;
 
 const pressOf = (p) => content.journalists.find((j) => j.id === p.pressId) || content.journalists[0];
 
@@ -184,7 +207,8 @@ function newRoomCode() {
 class Room {
   constructor(code) {
     this.code = code;
-    // playerId -> { id, name, color, connected, disconnectedAt, score, characterId, pressId, bot, dropTimer }
+    this.tvKey = crypto.randomBytes(8).toString('hex'); // players know the code, only the TV has this
+    // playerId -> { id, name, color, connected, disconnectedAt, score, avatar, characterId, pressId, bot, dropTimer }
     this.players = new Map();
     this.phase = 'lobby';
     this.round = 0;
@@ -196,9 +220,10 @@ class Room {
     this.questionVotes = new Map(); // voterId -> journalistId whose question they picked
     this.chosen = null; // { journalistId, question, opener, answer } the question that gets asked
     this.saboteurId = null; // the journalist writing the teleprompter this round
-    this.ratings = new Map(); // journalistId -> 1..5 stars for the answer
-    this.slip = null; // { type, at } the politician's slip this round
-    this.gotchas = new Map(); // journalistId -> { caught, misses, last }
+    this.approval = START_APPROVAL; // secret until the news response
+    this.reactions = new Map(); // journalistId -> reactions used on this answer
+    this.reactionPoints = 0; // what one positive reaction adds to approval this round
+    this.lineDone = false; // the TV finished playing the answer
     this.results = null;
     this.endsAt = null; // only for phases with a visible countdown
     this.timer = null;
@@ -223,20 +248,22 @@ class Room {
       connected: p.connected,
       bot: p.bot,
       score: p.score,
-      character: characterInfo(p.characterId),
-      look: characterOf(p.characterId)?.look || {},
+      approvalPoints: p.approvalPoints,
+      pressPoints: p.pressPoints,
+      character: characterInfo(p),
+      avatar: p.avatar, // { suit, face, hair }: indexes into AVATAR_OPTIONS
+      avatarUrl: avatarUrl(p.avatar),
       outlet: pressOf(p).outlet,
       asked: this.asks.has(p.id),
       voted: this.phase === 'pick' && this.questionVotes.has(p.id),
-      rated: this.ratings.has(p.id),
     };
   }
 
   publicState() {
     const showQuestions = this.phase === 'pick';
-    const showChosen = ['question', 'sabotage', 'answer', 'hearing', 'rate', 'results', 'final'].includes(this.phase);
-    const showOpener = ['answer', 'hearing', 'rate', 'results', 'final'].includes(this.phase);
-    const showAnswer = ['hearing', 'rate', 'results', 'final'].includes(this.phase);
+    const showChosen = ['question', 'sabotage', 'answer', 'hearing', 'news', 'final'].includes(this.phase);
+    const showOpener = ['answer', 'hearing', 'news', 'final'].includes(this.phase);
+    const showAnswer = ['hearing', 'news', 'final'].includes(this.phase);
     return {
       roomCode: this.code,
       phase: this.phase,
@@ -244,13 +271,8 @@ class Room {
       round: this.round,
       totalRounds: this.totalRounds,
       players: [...this.players.values()].map((p) => this.publicPlayer(p)),
-      // The politicians to pick from in the lobby, and who has each one.
-      characters: this.phase === 'lobby'
-        ? content.politicians.map((c) => ({
-            id: c.id, name: c.name, title: c.title, look: c.look,
-            takenBy: [...this.players.values()].find((p) => p.characterId === c.id)?.id || null,
-          }))
-        : [],
+      // What phones can pick from in the lobby.
+      avatarOptions: this.phase === 'lobby' ? this.avatarOptions() : null,
       politicianId: this.politicianId,
       headline: this.headline ? this.headline.text : null,
       // While picking, questions don't say who wrote them.
@@ -268,6 +290,7 @@ class Room {
   }
 
   broadcast() {
+    if (this.phase === 'lobby') this.fitAvatars();
     this.emit('game:state', this.publicState());
   }
 
@@ -280,8 +303,8 @@ class Room {
       role,
       question: this.asks.get(playerId) || null,
       saboteur: this.phase === 'sabotage' && playerId === this.saboteurId,
-      slipped: playerId === this.politicianId && Boolean(this.slip),
-      votes: { question: this.questionVotes.get(playerId) || null, stars: this.ratings.get(playerId) || null },
+      votes: { question: this.questionVotes.get(playerId) || null },
+      reactionsLeft: REACTIONS_PER_ANSWER - (this.reactions.get(playerId) || 0),
     };
   }
 
@@ -328,14 +351,16 @@ class Room {
     const journalists = this.activeJournalists();
     if (this.phase === 'ask' && journalists.every((p) => this.asks.has(p.id))) this.closeAsks();
     else if (this.phase === 'pick' && journalists.every((p) => this.questionVotes.has(p.id) || !this.canPick(p.id))) this.closePick();
-    // Rating also waits for the slip (or the timer): the politician wants the press looking down.
-    else if (this.phase === 'rate' && this.slip && journalists.every((p) => this.ratings.has(p.id))) this.finishRound();
   }
 
   // ---- phases ----
 
+  clearScores() {
+    for (const p of this.players.values()) Object.assign(p, { score: 0, approvalPoints: 0, pressPoints: 0 });
+  }
+
   startGame() {
-    for (const p of this.players.values()) p.score = 0;
+    this.clearScores();
     this.order = this.connectedPlayers().map((p) => p.id);
     this.totalRounds = ROUNDS || this.order.length;
     this.round = 0;
@@ -366,24 +391,31 @@ class Room {
   nextRound() {
     this.round++;
     this.politicianId = this.pickPolitician();
-    // "{name}" in a headline becomes the politician's character name.
+    // "{name}" in a headline becomes the politician's name.
     const h = this.nextHeadline();
-    const character = characterInfo(this.players.get(this.politicianId)?.characterId);
-    this.headline = { text: h.text.replace(/\{name\}/g, character?.name || 'Politician'), questions: h.questions || [] };
+    const politician = this.players.get(this.politicianId);
+    this.headline = { text: h.text.replace(/\{name\}/g, politician ? stageName(politician) : 'Politician'), questions: h.questions || [] };
     this.headlineQuestions = shuffle(this.headline.questions);
     this.asks.clear();
     this.questionVotes.clear();
-    this.ratings.clear();
+    this.reactions.clear();
+    this.approval = START_APPROVAL;
+    this.lineDone = false;
+    // Bots lean the same way each round, so a room of them can make a hit or a flop.
+    const lean = pick([0.9, 0.5, 0.1]);
+    for (const p of this.players.values()) if (p.bot) p.mood = Math.min(1, Math.max(0, lean + (Math.random() - 0.5) * 0.2));
     this.chosen = null;
-    this.pickTally = null;
     this.saboteurId = null;
-    this.slip = null;
-    this.gotchas.clear();
     this.results = null;
-    this.setPhase('ask', { timerMs: ASK_MS, visible: true, onTimeout: () => this.closeAsks() });
-    this.sendYouAll();
     const text = this.headline.text;
-    this.emit('headline:read', { round: this.round, text, audioUrl: speak(`Breaking news. ${text}.`, voiceIdFor('anchor')) });
+    const speech = `Breaking news. ${text}.`;
+    this.setPhase('breaking', { timerMs: speakingMs(speech, MAX_HEADLINE_MS) + HEADLINE_PAD_MS, onTimeout: () => this.startAsk() });
+    this.sendYouAll();
+    this.emit('headline:read', { round: this.round, text, audioUrl: speak(speech, ANCHOR_VOICE_ID) });
+  }
+
+  startAsk() {
+    this.setPhase('ask', { timerMs: ASK_MS, visible: true, onTimeout: () => this.closeAsks() });
   }
 
   submitQuestion(playerId, text) {
@@ -426,7 +458,6 @@ class Room {
     for (const target of this.questionVotes.values()) tally.set(target, tally.get(target) + 1);
     const top = Math.max(...tally.values());
     const journalistId = pick([...tally.keys()].filter((id) => tally.get(id) === top));
-    this.pickTally = Object.fromEntries([...tally].filter(([id]) => id));
     this.chosen = { journalistId, question: this.asks.get(journalistId), opener: null, answer: null };
     this.askQuestion();
   }
@@ -463,6 +494,7 @@ class Room {
     text = stripTags(cleanText(text, MAX_OPENER));
     if (!text) return { error: 'Write something' };
     this.chosen.opener = text;
+    this.chosen.openerBy = playerId;
     this.closeSabotage();
     return { ok: true };
   }
@@ -497,84 +529,89 @@ class Room {
     // Screens get the text without tags; only the voice hears them.
     this.chosen.answer = stripTags(text) || text;
     const round = this.round;
-    this.setPhase('hearing', { timerMs: speakingMs(this.chosen.answer, MAX_LINE_MS) + 2000, onTimeout: () => this.startRating() });
+    // A full room of positive reactions takes approval from 50 to 100.
+    this.reactionPoints = (100 - START_APPROVAL) / (Math.max(1, this.activeJournalists().length) * REACTIONS_PER_ANSWER);
+    this.setPhase('hearing', { timerMs: speakingMs(this.chosen.answer, MAX_LINE_MS) + REACTION_WINDOW_MS, onTimeout: () => this.startNews() });
     console.log(`[${this.code}]   says: ${speech}`);
     this.emit('hearing:line', {
       round,
       playerId: this.politicianId,
-      character: p ? characterInfo(p.characterId) : null,
+      character: p ? characterInfo(p) : null,
       text: this.chosen.answer,
       opener: this.chosen.opener,
       audioUrl,
     });
   }
 
-  startRating() {
-    if (!this.activeJournalists().length) return this.finishRound(); // nobody to rate
-    this.setPhase('rate', { timerMs: RATE_MS, visible: true, onTimeout: () => this.finishRound() });
-    this.sendYouAll();
+  // The TV finished playing the answer: the press gets a last moment to react.
+  lineFinished() {
+    if (this.lineDone) return;
+    this.lineDone = true;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.startNews(), REACTION_WINDOW_MS);
   }
 
-  rateAnswer(voterId, stars) {
-    if (this.phase !== 'rate') return { error: 'Rating is closed' };
-    if (voterId === this.politicianId) return { error: "You can't rate yourself" };
-    stars = Math.round(Number(stars));
-    if (!(stars >= 1 && stars <= 5)) return { error: 'Rate 1 to 5 stars' };
-    this.ratings.set(voterId, stars);
-    this.sendYou(voterId);
-    this.broadcast();
-    this.checkAllIn();
-    return { ok: true };
+  // Reporters score for votes on their question, and for setting up an answer that landed.
+  scoreRound(approval) {
+    const press = new Map();
+    const add = (id, n) => press.set(id, (press.get(id) || 0) + n);
+    for (const target of this.questionVotes.values()) add(target, VOTE_POINTS);
+    if (approval > START_APPROVAL) add(this.chosen.journalistId, Math.round((approval - START_APPROVAL) * SETUP_SHARE));
+    for (const [id, n] of press) {
+      const p = this.players.get(id);
+      if (!p) continue;
+      p.pressPoints += n;
+      p.score += n;
+    }
+    const politician = this.players.get(this.politicianId);
+    if (politician) {
+      politician.approvalPoints += approval;
+      politician.score += approval;
+    }
+  }
+
+  // One sentence on how the answer landed, and one crediting the asker and the saboteur.
+  verdict(approval) {
+    const { lines } = content.anchor;
+    const nameOf = (id) => (this.players.has(id) ? stageName(this.players.get(id)) : null);
+    const asker = approval > START_APPROVAL ? nameOf(this.chosen.journalistId) : null;
+    const saboteur = nameOf(this.chosen.openerBy);
+    const list = this.reactions.size ? lines[verdictBand(approval)] : lines.noReactions;
+    let credit = null;
+    if (asker && asker === saboteur) credit = lines.creditSame;
+    else if (asker && saboteur) credit = lines.creditBoth;
+    else if (asker) credit = lines.creditAsker;
+    else if (saboteur) credit = lines.creditSaboteur;
+    const names = { name: nameOf(this.politicianId) || 'The politician', asker, saboteur };
+    return [list, credit].filter(Boolean).map((l) => fillLine(pick(l), names)).join(' ');
+  }
+
+  // The anchor comes back with the verdict, and this is where approval is revealed.
+  startNews() {
+    const approval = Math.round(this.approval);
+    this.scoreRound(approval);
+    const speech = this.verdict(approval);
+    const text = stripTags(speech);
+    this.results = { approval, verdict: text };
+    const round = this.round;
+    this.setPhase('news', { timerMs: speakingMs(text, MAX_VERDICT_MS) + HEADLINE_PAD_MS, onTimeout: () => this.finishRound() });
+    this.sendYouAll();
+    console.log(`[${this.code}]   approval ${approval}: ${speech}`);
+    this.emit('news:read', { round, text, audioUrl: speak(speech, ANCHOR_VOICE_ID) });
   }
 
   finishRound() {
-    // A slip just happened: give the press the rest of their time to catch it.
-    const wait = this.slip ? this.slip.at + GOTCHA_WINDOW_MS - Date.now() : 0;
-    if (wait > 0) {
-      clearTimeout(this.timer);
-      this.timer = setTimeout(() => this.finishRound(), wait);
-      return;
-    }
-
-    const points = {};
-    const add = (id, n) => (points[id] = (points[id] || 0) + n);
-    const author = this.chosen?.journalistId;
-    if (author && this.players.has(author)) add(author, BEST_QUESTION_POINTS);
-
-    const stars = [...this.ratings.values()];
-    const average = stars.length ? stars.reduce((a, b) => a + b, 0) / stars.length : 0;
-    if (stars.length) add(this.politicianId, Math.round(average * POINTS_PER_STAR));
-
-    const caught = [];
-    const missed = [];
-    for (const p of this.activeJournalists()) (this.gotchas.get(p.id)?.caught ? caught : missed).push(p.id);
-    if (this.slip) {
-      for (const id of caught) add(id, GOTCHA_POINTS);
-      if (missed.length) add(this.politicianId, missed.length * SLIP_POINTS);
-    }
-    const falseGotchas = {};
-    for (const [id, g] of this.gotchas) {
-      if (!g.misses) continue;
-      falseGotchas[id] = g.misses;
-      add(id, -g.misses * FALSE_GOTCHA_POINTS);
-    }
-
-    for (const [id, n] of Object.entries(points)) {
-      const p = this.players.get(id);
-      if (p) p.score += n;
-    }
-    this.results = {
-      bestQuestion: author || null,
-      saboteurId: this.saboteurId,
-      questionVotes: this.pickTally || {},
-      rating: { average: Math.round(average * 10) / 10, count: stars.length },
-      slip: this.slip ? { type: this.slip.type, caught, missed } : null,
-      falseGotchas,
-      points,
-    };
-
-    if (this.round >= this.totalRounds) this.setPhase('final');
-    else this.setPhase('results', { timerMs: RESULTS_MS + (this.slip ? REPLAY_MS : 0), visible: true, onTimeout: () => this.nextRound() });
+    if (this.round < this.totalRounds) return this.nextRound();
+    const players = [...this.players.values()];
+    const top = Math.max(...players.map((p) => p.score));
+    const winners = players.filter((p) => p.score === top).map(stageName);
+    const { final, finalTie } = content.anchor.lines;
+    const speech = fillLine(pick(winners.length > 1 ? finalTie : final), { name: winners[0], names: listNames(winners) });
+    const text = stripTags(speech);
+    this.results = { finalLine: text };
+    this.setPhase('final');
+    this.sendYouAll();
+    this.emit('final:read', { audioUrl: speak(speech, ANCHOR_VOICE_ID) });
   }
 
   skipPhase() {
@@ -587,12 +624,11 @@ class Room {
 
   reset() {
     clearTimeout(this.timer);
-    for (const p of this.players.values()) p.score = 0;
-    Object.assign(this, { round: 0, totalRounds: 0, politicianId: null, headline: null, chosen: null, saboteurId: null, slip: null, results: null, endsAt: null, timer: null });
+    this.clearScores();
+    Object.assign(this, { round: 0, totalRounds: 0, politicianId: null, headline: null, chosen: null, saboteurId: null, results: null, endsAt: null, timer: null });
     this.asks.clear();
-    this.gotchas.clear();
     this.questionVotes.clear();
-    this.ratings.clear();
+    this.reactions.clear();
     this.setPhase('lobby');
     this.sendYouAll();
   }
@@ -616,6 +652,29 @@ class Room {
     return (free || content.journalists[this.players.size % content.journalists.length]).id;
   }
 
+  // One option per player, with at least two to choose from and no more than the art allows.
+  avatarOptionCount() {
+    return Math.min(MAX_AVATAR_OPTIONS, Math.max(MIN_PLAYERS, this.players.size));
+  }
+
+  avatarOptions() {
+    const count = this.avatarOptionCount();
+    return Object.fromEntries(AVATAR_ITEMS.map((item) => [item, AVATAR_OPTIONS[item].slice(0, count)]));
+  }
+
+  randomAvatar() {
+    const count = this.avatarOptionCount();
+    return Object.fromEntries(AVATAR_ITEMS.map((item) => [item, Math.floor(Math.random() * count)]));
+  }
+
+  // Fewer players means fewer options, so picks that no longer exist move to the last one left.
+  fitAvatars() {
+    const last = this.avatarOptionCount() - 1;
+    for (const p of this.players.values()) {
+      for (const item of AVATAR_ITEMS) p.avatar[item] = Math.min(p.avatar[item], last);
+    }
+  }
+
   addPlayer(id, name, bot = false) {
     const player = {
       id,
@@ -624,6 +683,9 @@ class Room {
       connected: true,
       disconnectedAt: 0,
       score: 0,
+      approvalPoints: 0,
+      pressPoints: 0,
+      avatar: this.randomAvatar(),
       characterId: this.pickCharacter(),
       pressId: this.pickPress(),
       bot,
@@ -632,15 +694,25 @@ class Room {
     return player;
   }
 
-  // Players pick their politician in the lobby. A bot gives theirs up and takes a free one.
-  setCharacter(playerId, characterId) {
+  // Players can change their name and look until the game starts. Several players can pick
+  // the same option; to make picks exclusive, reject taken ones in setAvatar.
+  setName(playerId, name) {
     if (this.phase !== 'lobby') return { error: 'The game has started' };
-    if (!characterOf(characterId)) return { error: 'Unknown politician' };
+    const clean = cleanName(name);
+    if (!clean) return { error: 'Type a name first' };
+    this.players.get(playerId).name = clean;
+    this.sendYou(playerId);
+    this.broadcast();
+    return { ok: true };
+  }
+
+  setAvatar(playerId, picks) {
+    if (this.phase !== 'lobby') return { error: 'The game has started' };
+    const count = this.avatarOptionCount();
+    const chosen = AVATAR_ITEMS.filter((item) => item in picks);
+    if (!chosen.length || chosen.some((item) => !Number.isInteger(picks[item]) || picks[item] < 0 || picks[item] >= count)) return { error: 'Unknown option' };
     const p = this.players.get(playerId);
-    const holder = [...this.players.values()].find((o) => o.id !== playerId && o.characterId === characterId);
-    if (holder && !holder.bot) return { error: `${holder.name} already picked them` };
-    p.characterId = characterId;
-    if (holder) holder.characterId = this.pickCharacter();
+    for (const item of chosen) p.avatar[item] = picks[item];
     this.sendYou(playerId);
     this.broadcast();
     return { ok: true };
@@ -665,7 +737,7 @@ class Room {
     return { ok: true };
   }
 
-  // Bots ask, vote, sabotage, answer, heckle and rate a few seconds into each phase, like slow humans.
+  // Bots ask, vote, sabotage, answer and react a few seconds into each phase, like slow humans.
   runBots() {
     const round = this.round;
     const still = (phase) => this.phase === phase && this.round === round;
@@ -683,67 +755,46 @@ class Room {
       if (this.phase === 'sabotage' && bot.id === this.saboteurId) {
         setTimeout(() => still('sabotage') && this.submitOpener(bot.id, pick(content.openers)), randomMs(3000, 8000));
       }
-      if ((this.phase === 'hearing' || this.phase === 'rate') && !atPodium) {
-        const phase = this.phase;
-        for (let i = 0; i < 3; i++) setTimeout(() => still(phase) && this.react(bot.id, pick(REACTIONS)), randomMs(800, 7000));
-      }
-      // A politician bot slips once, partway through the answer or the rating.
-      if ((this.phase === 'hearing' || this.phase === 'rate') && atPodium && !this.slip) {
-        const phase = this.phase;
-        setTimeout(() => still(phase) && !this.slip && this.doSlip(bot.id, pick(SLIPS)), randomMs(1500, 6000));
+      if (this.phase === 'hearing' && !atPodium) {
+        let wait = 0;
+        for (let i = 0; i < REACTIONS_PER_ANSWER; i++) {
+          wait += randomMs(500, 1400);
+          const type = pick(Math.random() < (bot.mood ?? 0.5) ? POSITIVE_REACTIONS : NEGATIVE_REACTIONS);
+          setTimeout(() => still('hearing') && this.react(bot.id, type), wait);
+        }
       }
       if (this.phase === 'answer' && atPodium) {
         setTimeout(() => still('answer') && this.submitAnswer(bot.id, pick(content.botAnswers)), randomMs(3000, 8000));
       }
-      if (this.phase === 'rate' && !atPodium) {
-        setTimeout(() => still('rate') && this.rateAnswer(bot.id, 2 + Math.floor(Math.random() * 4)), randomMs(2000, 6000));
-      }
     }
   }
 
-  // Journalists heckle while the answer plays and while it's rated. The TV shows it.
+  // Journalists react while the answer plays and just after. Each reaction moves the secret
+  // approval, and a negative one counts for half, so a big laugh beats booing a rival.
   react(playerId, type) {
-    if (!['hearing', 'rate'].includes(this.phase)) return { error: 'Not now' };
+    if (this.phase !== 'hearing') return { error: 'Not now' };
     if (playerId === this.politicianId) return { error: "You can't heckle yourself" };
     if (!REACTIONS.includes(type)) return { error: 'Unknown reaction' };
     const p = this.players.get(playerId);
+    const used = this.reactions.get(playerId) || 0;
+    if (used >= REACTIONS_PER_ANSWER) return { error: 'No reactions left' };
     if (Date.now() - (p.lastReact || 0) < REACT_GAP_MS) return { error: 'Slow down' };
     p.lastReact = Date.now();
-    this.emit('crowd:react', { playerId, type });
-    return { ok: true };
-  }
-
-  // The politician secretly does something shady on the TV, once a round, while the answer
-  // plays or is rated. Only the TV is told, so the press has to be watching to see it.
-  doSlip(playerId, type) {
-    if (!['hearing', 'rate'].includes(this.phase)) return { error: 'Not now' };
-    if (playerId !== this.politicianId) return { error: "You're not at the podium" };
-    if (this.slip) return { error: 'You already slipped this round' };
-    if (!SLIPS.includes(type)) return { error: 'Unknown slip' };
-    this.slip = { type, at: Date.now() };
-    if (this.phase === 'rate') setTimeout(() => this.phase === 'rate' && this.checkAllIn(), 0);
-    io.to(`${this.code}:tv`).emit('slip:show', { round: this.round, type });
+    this.reactions.set(playerId, used + 1);
+    const sweating = this.sweating();
+    const change = POSITIVE_REACTIONS.includes(type) ? this.reactionPoints : -this.reactionPoints / 2;
+    this.approval = Math.min(100, Math.max(0, this.approval + change));
+    // TV only, so a phone can't work out the approval from the reactions.
+    const tv = io.to(`${this.code}:tv`);
+    tv.emit('crowd:react', { playerId, type });
+    if (this.sweating() !== sweating) tv.emit('podium:sweat', this.sweating());
     this.sendYou(playerId);
-    // Bots catch it about half the time.
-    for (const bot of this.activeJournalists().filter((p) => p.bot)) {
-      if (Math.random() < 0.5) setTimeout(() => this.gotcha(bot.id), randomMs(600, 2200));
-    }
     return { ok: true };
   }
 
-  // A journalist thinks they saw the slip. Whether they caught it stays secret until the
-  // results, so nobody can copy the first one to call it.
-  gotcha(playerId) {
-    if (!['hearing', 'rate'].includes(this.phase)) return { error: 'Not now' };
-    if (playerId === this.politicianId) return { error: "You're at the podium" };
-    const g = this.gotchas.get(playerId) || { caught: false, misses: 0, last: 0 };
-    if (g.caught) return { ok: true };
-    if (Date.now() - g.last < GOTCHA_GAP_MS) return { error: 'Slow down' };
-    g.last = Date.now();
-    if (this.slip && g.last - this.slip.at <= GOTCHA_WINDOW_MS) g.caught = true;
-    else g.misses++;
-    this.gotchas.set(playerId, g);
-    return { ok: true };
+  // All the TV learns about approval before the news response.
+  sweating() {
+    return this.phase === 'hearing' && this.approval < SWEAT_BELOW;
   }
 
   // Exit button on the phone. In the lobby the player is gone for good; mid-game they
@@ -797,12 +848,21 @@ setInterval(() => {
 io.on('connection', (socket) => {
   const room = () => rooms.get(socket.data.roomCode);
   const reply = (ack) => (typeof ack === 'function' ? ack : () => {});
+  // Anyone can send anything, and one bad message mustn't end every game on the server.
+  const on = (event, handler) => socket.on(event, (...args) => {
+    try {
+      handler(...args);
+    } catch (err) {
+      console.error(`Bad ${event} message:`, err.message);
+    }
+  });
 
   // The TV creates a room, or gets its old one back after a refresh.
-  socket.on('tv:join', (data, ack) => {
+  on('tv:join', (data, ack) => {
     if (typeof data === 'function') [data, ack] = [{}, data];
     ack = reply(ack);
     let r = rooms.get(String(data?.roomCode || '').toUpperCase());
+    if (r?.tvKey !== data?.key) r = null; // the code alone doesn't take over someone's game
     if (!r) {
       if (rooms.size >= MAX_ROOMS) return ack({ error: 'Too many games running, try again in a few minutes' });
       r = new Room(newRoomCode());
@@ -813,10 +873,10 @@ io.on('connection', (socket) => {
     socket.data.tv = true;
     socket.join(r.code);
     socket.join(`${r.code}:tv`);
-    ack({ roomCode: r.code, state: r.publicState() });
+    ack({ roomCode: r.code, key: r.tvKey, state: r.publicState(), sweating: r.sweating() });
   });
 
-  socket.on('player:join', ({ roomCode, playerId, name } = {}, ack) => {
+  on('player:join', ({ roomCode, playerId, name } = {}, ack) => {
     ack = reply(ack);
     const r = rooms.get(String(roomCode || '').toUpperCase());
     if (!r) return ack({ error: 'Room not found. Check the code on the TV' });
@@ -824,9 +884,10 @@ io.on('connection', (socket) => {
 
     let player = r.players.get(playerId);
     if (!player) {
+      if (!cleanName(name)) return ack({ error: 'Type a name first' });
       if (r.players.size >= MAX_PLAYERS) return ack({ error: 'The room is full' });
       player = r.addPlayer(playerId, name);
-    } else if (name) {
+    } else if (cleanName(name)) {
       player.name = cleanName(name);
     }
     player.connected = true;
@@ -841,22 +902,20 @@ io.on('connection', (socket) => {
 
   // Phone messages: the sender must have joined the room.
   const playerAction = (event, handler) => {
-    socket.on(event, (data = {}, ack) => {
+    on(event, (data = {}, ack) => {
       ack = reply(ack);
       const r = room();
       if (!r || !r.players.has(socket.data.playerId)) return ack({ error: 'Join first' });
       ack(handler(r, socket.data.playerId, data || {}));
     });
   };
-  playerAction('player:character', (r, id, { characterId }) => r.setCharacter(id, characterId));
+  playerAction('player:name', (r, id, { name }) => r.setName(id, name));
+  playerAction('player:avatar', (r, id, picks) => r.setAvatar(id, picks));
   playerAction('question:submit', (r, id, { text }) => r.submitQuestion(id, text));
   playerAction('vote:question', (r, id, { targetId }) => r.voteQuestion(id, targetId));
   playerAction('answer:submit', (r, id, { text }) => r.submitAnswer(id, text));
-  playerAction('answer:rate', (r, id, { stars }) => r.rateAnswer(id, stars));
   playerAction('opener:submit', (r, id, { text }) => r.submitOpener(id, text));
   playerAction('crowd:react', (r, id, { type }) => r.react(id, type));
-  playerAction('slip:do', (r, id, { type }) => r.doSlip(id, type));
-  playerAction('crowd:gotcha', (r, id) => r.gotcha(id));
   playerAction('player:leave', (r, id) => {
     socket.leave(`${r.code}:${id}`);
     socket.data.playerId = null;
@@ -866,7 +925,7 @@ io.on('connection', (socket) => {
   // TV only from here on.
   const tvRoom = () => (socket.data.tv ? room() : null);
 
-  socket.on('game:start', (ack) => {
+  on('game:start', (ack) => {
     ack = reply(ack);
     const r = tvRoom();
     if (!r) return ack({ error: 'Not a TV' });
@@ -876,33 +935,43 @@ io.on('connection', (socket) => {
     r.startGame();
   });
 
-  socket.on('bot:add', (ack) => {
+  on('bot:add', (ack) => {
     ack = reply(ack);
     const r = tvRoom();
     ack(r ? r.addBot() : { error: 'Not a TV' });
   });
 
-  socket.on('bot:remove', ({ playerId } = {}, ack) => {
+  on('bot:remove', ({ playerId } = {}, ack) => {
     ack = reply(ack);
     const r = tvRoom();
     ack(r ? r.removeBot(playerId) : { error: 'Not a TV' });
   });
 
-  socket.on('question:done', ({ round } = {}) => {
+  on('headline:done', ({ round } = {}) => {
+    const r = tvRoom();
+    if (r && r.phase === 'breaking' && round === r.round) r.startAsk();
+  });
+
+  on('question:done', ({ round } = {}) => {
     const r = tvRoom();
     if (r && r.phase === 'question' && round === r.round) r.startSabotage();
   });
 
-  socket.on('hearing:done', ({ round } = {}) => {
+  on('hearing:done', ({ round } = {}) => {
     const r = tvRoom();
-    if (r && r.phase === 'hearing' && round === r.round) r.startRating();
+    if (r && r.phase === 'hearing' && round === r.round) r.lineFinished();
+  });
+
+  on('news:done', ({ round } = {}) => {
+    const r = tvRoom();
+    if (r && r.phase === 'news' && round === r.round) r.finishRound();
   });
 
   // Dev: skip the rest of the current phase. In the lobby, start with any number of players.
-  socket.on('phase:next', () => tvRoom()?.skipPhase());
-  socket.on('game:reset', () => tvRoom()?.reset());
+  on('phase:next', () => tvRoom()?.skipPhase());
+  on('game:reset', () => tvRoom()?.reset());
 
-  socket.on('disconnect', () => {
+  on('disconnect', () => {
     const r = room();
     const player = r && r.players.get(socket.data.playerId);
     if (!player) return;
@@ -917,10 +986,13 @@ setInterval(() => {
   for (const room of rooms.values()) if (room.endsAt) room.broadcast();
 }, 5000).unref();
 
+// A bug in one room's timer shouldn't take the other rooms down with it.
+process.on('uncaughtException', (err) => console.error('Uncaught error:', err));
+
 server.listen(PORT, () => {
   console.log(`Press Conference running on http://localhost:${PORT}`);
   console.log(`  TV:     http://localhost:${PORT}/tv   (each TV gets its own room)`);
   console.log(`  phones: scan the QR code on the TV page`);
-  console.log(`  voice:  ${API_KEY ? `on (${TTS_MODEL})` : 'off (set ELEVENLABS_API_KEY in .env)'}`);
+  console.log(`  voice:  ${API_KEY ? `on (${TTS_MODEL}, ${TTS_DAILY_CHARS} characters a day)` : 'off (set ELEVENLABS_API_KEY in .env)'}`);
   console.log(`  rounds: ${ROUNDS || 'one per player'}`);
 });

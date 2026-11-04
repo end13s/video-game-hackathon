@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: press-conference
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_TEST_VOICE_ID
+        sync: false

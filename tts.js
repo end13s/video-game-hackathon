@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const API_BASE = 'https://api.elevenlabs.io/v1';
 const OUTPUT_FORMAT = 'mp3_44100_128';
 const KEEP_MS = 5 * 60 * 1000;
+const TIMEOUT_MS = 30 * 1000; // past this the game has moved on anyway
 
 const jobs = new Map();
 
@@ -20,9 +21,6 @@ function startSpeech({ apiKey, voiceId, modelId, text }) {
     done: false,
     error: null,
     listeners: new Set(),
-    startedAt: Date.now(),
-    firstByteMs: null,
-    totalMs: null,
   };
   jobs.set(id, job);
   setTimeout(() => jobs.delete(id), KEEP_MS).unref();
@@ -34,6 +32,7 @@ function startSpeech({ apiKey, voiceId, modelId, text }) {
         method: 'POST',
         headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
         body: JSON.stringify({ text, model_id: modelId }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       if (!res.ok) {
         const body = await res.text();
@@ -41,24 +40,19 @@ function startSpeech({ apiKey, voiceId, modelId, text }) {
       }
       for await (const chunk of res.body) {
         const buf = Buffer.from(chunk);
-        if (job.firstByteMs === null) job.firstByteMs = Date.now() - job.startedAt;
         job.chunks.push(buf);
         for (const l of job.listeners) l.chunk(buf);
       }
     } catch (err) {
       job.error = err.message;
+      console.error('Speech failed:', err.message);
     }
     job.done = true;
-    job.totalMs = Date.now() - job.startedAt;
     for (const l of job.listeners) l.end();
     job.listeners.clear();
   })();
 
   return job;
-}
-
-function getJob(id) {
-  return jobs.get(id);
 }
 
 // Express handler body for GET /<prefix>/:id
@@ -90,4 +84,4 @@ function serveSpeech(req, res) {
   req.on('close', () => job.listeners.delete(listener));
 }
 
-module.exports = { startSpeech, getJob, serveSpeech };
+module.exports = { startSpeech, serveSpeech };

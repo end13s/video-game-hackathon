@@ -1,11 +1,15 @@
-// TV screen. Redraws everything from the latest game:state; question:ask and
-// hearing:line only add the audio and the subtitle.
+// TV screen. Redraws everything from the latest game:state; the events that carry
+// audio (headline:read, question:ask, hearing:line, news:read, final:read) only add that.
 const $ = (id) => document.getElementById(id);
 const socket = io();
 PressAudio.attach(socket); // sound effects, music and the anchor (public/sound.js)
 
 const params = new URLSearchParams(location.search);
 let roomCode = params.get('room');
+let tvKey = params.get('key');
+// N and R are for testing: one stray press of R would wipe a real game.
+const DEV = params.has('dev') || /^(localhost|127\.|10\.|192\.168\.)/.test(location.hostname);
+$('dev').classList.toggle('hidden', !DEV);
 let state = { phase: 'lobby', players: [], round: 0, questions: [] };
 let endsAt = null; // local time the current phase ends, from remainingMs
 
@@ -22,21 +26,23 @@ function setAll(selector, text) {
   for (const el of document.querySelectorAll(selector)) el.textContent = text;
 }
 function face(p, cls = '') {
-  return `<span class="face ${cls}" style="--c:${p?.color || '#999'}">${avatarSvg(p?.look, p?.color)}</span>`;
+  return `<span class="face ${cls}" style="--c:${p?.color || '#999'}">${p?.avatarUrl ? `<img src="${p.avatarUrl}" alt="">` : ''}</span>`;
 }
 
 // ---- connection ------------------------------------------------------------
 
 socket.on('connect', () => {
   $('offline').classList.add('hidden');
-  // Keeps the room code in the URL so a refresh rejoins the same room.
-  socket.emit('tv:join', { roomCode }, (res) => {
+  // Keeps the room in the URL so a refresh rejoins it.
+  socket.emit('tv:join', { roomCode, key: tvKey }, (res) => {
     if (res.error) return ($('start-error').textContent = res.error);
-    roomCode = res.roomCode;
+    ({ roomCode, key: tvKey } = res);
     params.set('room', roomCode);
+    params.set('key', tvKey);
     history.replaceState(null, '', `?${params}`);
     showJoinQr();
     render(res.state);
+    setSweat(res.sweating);
   });
 });
 socket.on('disconnect', () => $('offline').classList.remove('hidden'));
@@ -44,8 +50,10 @@ socket.on('game:state', render);
 socket.on('headline:read', onHeadline);
 socket.on('question:ask', onQuestion);
 socket.on('hearing:line', onHearingLine);
+socket.on('news:read', onNews);
+socket.on('final:read', onFinal);
 socket.on('crowd:react', onReact);
-socket.on('slip:show', ({ type }) => playSlip(type));
+socket.on('podium:sweat', setSweat);
 
 // ---- join QR ---------------------------------------------------------------
 
@@ -60,15 +68,16 @@ fetch('/config')
 
 function showJoinQr() {
   if (!roomCode) return;
-  const joinUrl = `${(publicUrl || location.origin).replace(/\/$/, '')}/?room=${roomCode}`;
+  const site = (publicUrl || location.origin).replace(/\/$/, '');
+  const joinUrl = `${site}/?room=${roomCode}`;
   $('qr').innerHTML = `<img src="/qr.svg?text=${encodeURIComponent(joinUrl)}" alt="QR code to join" style="width:100%;height:100%">`;
-  $('join-url').textContent = joinUrl;
+  $('join-url').textContent = `${site.replace(/^https?:\/\//, '')} · room ${roomCode}`;
   $('url-warning').classList.toggle('hidden', !/localhost|127\.0\.0\.1/.test(joinUrl));
 }
 
 // ---- render ----------------------------------------------------------------
 
-const SCREEN = { question: 'stage', sabotage: 'stage', answer: 'stage', hearing: 'stage', rate: 'stage', final: 'results' };
+const SCREEN = { question: 'stage', sabotage: 'stage', answer: 'stage', hearing: 'stage' };
 
 function render(s) {
   const prevPhase = state.phase;
@@ -81,30 +90,23 @@ function render(s) {
   const politician = playerById(s.politicianId);
   const journalists = s.players.filter((p) => p.id !== s.politicianId && p.connected);
   setAll('.round-tag', s.round ? `Round ${s.round} of ${s.totalRounds}` : '');
-  setAll('.total', s.players.filter((p) => p.connected).length);
   setAll('.headline', s.headline || '');
-  setAll('.journalist-total', journalists.length);
   renderPodium(politician, s.phase === 'hearing');
   renderPress();
 
+  if (entered && ['breaking', 'news'].includes(prevPhase)) audio.pause(); // N can cut the anchor off
+  if (s.phase !== 'hearing') setSweat(false);
   if (s.phase === 'lobby') renderLobby();
+  if (s.phase === 'breaking') setAll('.politician-title', charName(politician));
   if (s.phase === 'ask') {
     $('asked').textContent = journalists.filter((p) => p.asked).length;
     $('ask-total').textContent = journalists.length;
-    setAll('.politician-title', `${politician?.name}, as ${charName(politician)}`);
+    setAll('.politician-title', charName(politician));
     if (entered) cameraFlashes(3);
   }
-  if (s.phase === 'pick') {
-    $('picked').textContent = journalists.filter((p) => p.voted).length;
-    if (entered) renderPick();
-  }
-  if (['question', 'sabotage', 'answer', 'hearing', 'rate'].includes(s.phase)) renderStage(politician, entered);
-  if (s.phase === 'hearing' && entered) setApproval(50);
-  if (s.phase === 'rate') $('rated').textContent = journalists.filter((p) => p.rated).length;
-  if ((s.phase === 'results' || s.phase === 'final') && entered) {
-    renderResults();
-    if (s.results?.slip) startReplay(s.results.slip);
-  }
+  if (['question', 'sabotage', 'answer', 'hearing'].includes(s.phase)) renderStage(politician, entered);
+  if (s.phase === 'news') renderNews();
+  if (s.phase === 'final' && entered) renderFinal();
 
   if (entered) setTicker();
 }
@@ -113,7 +115,7 @@ function renderLobby() {
   const { players } = state;
   $('lobby-players').innerHTML = players.length
     ? players.map((p) => `<li style="--c:${p.color}" class="${p.connected ? '' : 'off'}">
-        ${face(p)}<span><span class="pname">${esc(p.name)}</span><span class="pchar">${esc(charName(p))}</span></span></li>`).join('')
+        ${face(p)}<span class="pname">${esc(p.name)}</span></li>`).join('')
     : '<li class="empty">Waiting for politicians…</li>';
   $('start').disabled = !players.some((p) => p.connected);
 }
@@ -124,10 +126,10 @@ function renderLobby() {
 let podiumKey = '';
 function renderPodium(p, speaking) {
   const el = $('politician');
-  const key = p ? `${p.id}:${JSON.stringify(p.look)}` : '';
+  const key = p ? `${p.id}:${JSON.stringify(p.avatar)}` : '';
   if (key !== podiumKey) {
     podiumKey = key;
-    el.innerHTML = p ? personSvg(p.look, p.color) : '';
+    el.innerHTML = p ? podiumFigure(p.avatar) : '';
     el.classList.remove('enter');
     void el.offsetWidth;
     if (p) el.classList.add('enter');
@@ -135,114 +137,22 @@ function renderPodium(p, speaking) {
   el.classList.toggle('speaking', speaking);
 }
 
-// The side walls, in perspective so the room reads as a box. The drawing is 96 x 70
-// (rem) on the bottom of the screen: the back wall meets the floor at y 51 (19rem up),
-// between x 15 and 81, and everything vanishes towards (48, 40).
-// A point on a wall: side -1 left / 1 right, k how near the viewer (1 = the back
-// corner, bigger = nearer), h height above the floor.
-function wallPoint(side, k, h) {
-  return [48 + side * 33 * k, 40 + (11 - h) * k];
-}
-function wallQuad(side, k1, k2, h1, h2, attrs) {
-  const pts = [[k1, h1], [k2, h1], [k2, h2], [k1, h2]].map(([k, h]) => wallPoint(side, k, h).map((n) => n.toFixed(2)).join(','));
-  return `<polygon points="${pts.join(' ')}" ${attrs}/>`;
-}
-// Flat things hung on a wall (a sign, a painting): content drawn in a w x h box,
-// skewed onto the wall between k1 and k2, h1 and h2.
-function onWall(side, k1, k2, h1, h2, w, h, inner) {
-  const [kl, kr] = side < 0 ? [k2, k1] : [k1, k2];
-  const [ax, ay] = wallPoint(side, kl, h2);
-  const [bx, by] = wallPoint(side, kr, h2);
-  const [dx, dy] = wallPoint(side, kl, h1);
-  const m = [(bx - ax) / w, (by - ay) / w, (dx - ax) / h, (dy - ay) / h, ax, ay].map((n) => n.toFixed(4));
-  return `<g transform="matrix(${m.join(' ')})">${inner}</g>`;
-}
-
-function buildWalls() {
-  // Panel seams, evenly spaced in depth.
-  const seams = Array.from({ length: 14 }, (_, i) => 1 / (1 - i * 0.045));
-  const wall = (side) => {
-    let svg = wallQuad(side, 1, 2.4, 0, 60, `fill="#1d2850"`);
-    svg += wallQuad(side, 1, 2.4, 35, 60, `fill="#121a38"`);
-    svg += wallQuad(side, 1, 2.4, 33.6, 35, `fill="#b8902a"`);
-    for (const k of seams) {
-      const [x1, y1] = wallPoint(side, k, 9.7);
-      const [x2, y2] = wallPoint(side, k, 33.6);
-      svg += `<path d="M${x1} ${y1} L${x2} ${y2}" stroke="#fff" stroke-opacity=".06" stroke-width=".18"/>`;
-    }
-    // Wood panelling up to the chair rail.
-    svg += wallQuad(side, 1, 2.4, 0, 9, `fill="#4a2b18"`);
-    seams.slice(0, -1).forEach((k, i) => {
-      svg += wallQuad(side, k + 0.006, seams[i + 1] - 0.006, 1.8, 7.6, `fill="#5e3820" stroke="#2e1a0d" stroke-width=".12"`);
-    });
-    svg += wallQuad(side, 1, 2.4, 9, 9.7, `fill="#8a5a36"`);
-    svg += wallQuad(side, 1, 2.4, 0, 1, `fill="#22130a"`);
-    return svg;
-  };
-  const sconce = (side, k, h) => {
-    const [x, y] = wallPoint(side, k, h);
-    return `<circle cx="${x}" cy="${y}" r="${3.2 * k}" fill="url(#sconceGlow)"/>`
-      + onWall(side, k - 0.012, k + 0.012, h - 1.5, h + 0.8, 10, 10,
-        `<path d="M3 10 L7 10 L6 4 L4 4Z" fill="#b8902a"/><ellipse cx="5" cy="3" rx="4" ry="3" fill="#ffe6a8"/>`);
-  };
-  const portrait = (side, k1, k2) => {
-    const face = avatarSvg(randomLook(), TIES[Math.floor(Math.random() * TIES.length)]).replace('<svg ', '<svg x="8" y="8" width="84" height="104" ');
-    return onWall(side, k1, k2, 10, 20, 100, 120,
-      `<rect width="100" height="120" fill="#c9a227"/><rect x="4" y="4" width="92" height="112" fill="#8a6510"/>
-       <rect x="8" y="8" width="84" height="104" fill="#3a2a1a"/>${face}
-       <rect x="8" y="8" width="84" height="104" fill="#5a3a10" opacity=".35"/>`);
-  };
-
-  // Left wall: a door with an exit sign.
-  let left = wall(-1);
-  left += wallQuad(-1, 1.2, 1.42, 0, 18.4, `fill="#8a5a36"`);
-  left += wallQuad(-1, 1.22, 1.4, 0, 17.4, `fill="#3d2312"`);
-  left += wallQuad(-1, 1.24, 1.38, 9.5, 16, `fill="#4a2b18" stroke="#2a170c" stroke-width=".12"`);
-  left += wallQuad(-1, 1.24, 1.38, 1.5, 8.5, `fill="#4a2b18" stroke="#2a170c" stroke-width=".12"`);
-  const [kx, ky] = wallPoint(-1, 1.25, 8.6);
-  left += `<circle cx="${kx}" cy="${ky}" r=".45" fill="#e2b13c"/>`;
-  left += onWall(-1, 1.24, 1.38, 19.2, 21.8, 50, 14,
-    `<rect width="50" height="14" rx="1.5" fill="#1a0d0d"/><text x="25" y="10.8" text-anchor="middle" textLength="36" lengthAdjust="spacingAndGlyphs" font-family="system-ui, sans-serif" font-weight="900" font-size="10" fill="#ff3b3b">EXIT</text>`);
-  left += sconce(-1, 1.1, 24);
-
-  // Right wall: portraits and lights.
-  let right = wall(1);
-  right += portrait(1, 1.06, 1.17) + portrait(1, 1.3, 1.45);
-  right += sconce(1, 1.235, 24);
-
-  $('side-walls').innerHTML = `<defs>
-      <radialGradient id="sconceGlow"><stop offset="0" stop-color="#ffd98a" stop-opacity=".55"/><stop offset="1" stop-color="#ffd98a" stop-opacity="0"/></radialGradient>
-      <linearGradient id="wallShadeL" gradientUnits="userSpaceOnUse" x1="15" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".05"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient>
-      <linearGradient id="wallShadeR" gradientUnits="userSpaceOnUse" x1="81" y1="0" x2="96" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".05"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient>
-    </defs>
-    ${left}${wallQuad(-1, 1, 2.4, 0, 60, 'fill="url(#wallShadeL)"')}
-    ${right}${wallQuad(1, 1, 2.4, 0, 60, 'fill="url(#wallShadeR)"')}
-    <path d="M15 0 L15 51 M81 0 L81 51" stroke="#000" stroke-opacity=".45" stroke-width=".3"/>`;
-}
-
 // The room is seen from the back: rows of chairs face the podium, with an aisle
 // down the middle. Players sit in the front row; the rows behind are filled with
 // background reporters and a few empty chairs.
 const BACK_ROWS = [
-  { bottom: 13.2, w: 4.2, dim: 0.6, seats: [21, 27, 33, 39, 61, 67, 73, 79] },
-  { bottom: 7.4, w: 5.8, dim: 0.72, seats: [13, 20.5, 28, 35.5, 64.5, 72, 79.5, 87] },
+  { bottom: 12.2, w: 4.2, seats: [21, 27, 33, 39, 61, 67, 73, 79] },
+  { bottom: 6.8, w: 5.8, seats: [13, 20.5, 28, 35.5, 64.5, 72, 79.5, 87] },
 ];
 const FRONT_ROW = { bottom: 0.5, w: 8.2, seats: [6, 15, 24, 33, 67, 76, 85, 94] };
 const FRONT_ORDER = [3, 4, 2, 5, 1, 6, 0, 7]; // players fill the seats next to the aisle first
-const TIES = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316', '#64748b'];
 
-function chairSvg() {
-  return `<div class="chair"><svg viewBox="0 0 100 70" xmlns="http://www.w3.org/2000/svg">
-    <path d="M22 44 L18 70M78 44 L82 70M50 44 L50 70" stroke="#55596a" stroke-width="3.5"/>
-    <rect x="6" y="0" width="88" height="46" rx="12" fill="#1b2a5c"/>
-    <rect x="6" y="0" width="88" height="46" rx="12" fill="url(#chairShade)"/>
-    <path d="M14 6 Q50 0 86 6" stroke="#fff" stroke-width="2" opacity=".18" fill="none"/>
-  </svg></div>`;
+function chairHtml() {
+  return '<div class="chair"><img src="/room/chair.png" alt=""></div>';
 }
 
 function seatHtml(x, row, inner, extra = '', playerId = '') {
-  const dim = row.dim ? ` filter:brightness(${row.dim});` : '';
-  return `<div class="seat ${extra}" ${playerId ? `data-id="${esc(playerId)}"` : ''} style="left:${x}%; bottom:${row.bottom}rem; width:${row.w}rem; height:${row.w * 1.75}rem;${dim}">${inner}</div>`;
+  return `<div class="seat ${extra}" ${playerId ? `data-id="${esc(playerId)}"` : ''} style="left:${x}%; bottom:${row.bottom}rem; width:${row.w}rem; height:${row.w * 1.75}rem;">${inner}</div>`;
 }
 
 function buildRows() {
@@ -250,9 +160,9 @@ function buildRows() {
   for (const row of BACK_ROWS) {
     for (const x of row.seats) {
       const person = Math.random() < 0.8
-        ? `<div class="person" style="--d:-${(Math.random() * 4).toFixed(1)}s">${backSvg(randomLook(), TIES[Math.floor(Math.random() * TIES.length)])}</div>`
+        ? `<div class="person" style="--d:-${(Math.random() * 4).toFixed(1)}s">${crowdFigure()}</div>`
         : '';
-      html += seatHtml(x, row, person + chairSvg());
+      html += seatHtml(x, row, person + chairHtml());
     }
   }
   $('rows').innerHTML = html;
@@ -265,20 +175,20 @@ let pressKey = '';
 function renderPress() {
   const inRound = state.phase !== 'lobby';
   const people = state.players.filter((p) => p.connected && (!inRound || p.id !== state.politicianId));
-  const spotlightId = ['question', 'sabotage', 'answer', 'hearing', 'rate'].includes(state.phase) ? state.chosen?.journalistId : null;
+  const spotlightId = ['question', 'sabotage', 'answer', 'hearing'].includes(state.phase) ? state.chosen?.journalistId : null;
   const askerId = state.phase === 'question' ? spotlightId : null;
-  const key = JSON.stringify([people.map((p) => [p.id, p.look]), inRound, spotlightId, askerId]);
+  const key = JSON.stringify([people.map((p) => [p.id, p.avatar]), inRound, spotlightId, askerId]);
   if (key === pressKey) return;
   pressKey = key;
   const bySeat = {};
   people.forEach((p, i) => (bySeat[FRONT_ORDER[i % FRONT_ORDER.length]] = p));
   $('press').innerHTML = FRONT_ROW.seats.map((x, i) => {
     const p = bySeat[i];
-    if (!p) return seatHtml(x, FRONT_ROW, chairSvg());
+    if (!p) return seatHtml(x, FRONT_ROW, chairHtml());
     const standing = p.id === spotlightId;
-    const figure = `<div class="person">${backSvg(p.look, p.color, { pose: p.id === askerId ? 'raise' : null })}</div>`;
+    const figure = `<div class="person">${pressFigure(p.avatar, { pose: p.id === askerId ? 'raise' : null })}</div>`;
     const plate = `<span class="plate" style="--c:${p.color}">${esc(p.name)}${inRound ? `<small>${esc(p.outlet)}</small>` : ''}</span>`;
-    return seatHtml(x, FRONT_ROW, figure + chairSvg() + plate, standing ? 'standing' : '', p.id);
+    return seatHtml(x, FRONT_ROW, figure + chairHtml() + plate, standing ? 'standing' : '', p.id);
   }).join('');
 }
 
@@ -288,7 +198,7 @@ function startWalkers() {
   ['camera', 'camera'].forEach((prop, i) => {
     const el = document.createElement('div');
     el.className = 'person';
-    el.innerHTML = backSvg(randomLook(), TIES[i], { standing: true, prop });
+    el.innerHTML = walkerFigure(i);
     const w = { el, prop, x: offPodium() };
     el.style.left = `${w.x}%`;
     $('walkers').appendChild(el);
@@ -326,7 +236,6 @@ function shoot(w) {
   w.el.classList.add('shoot');
 }
 
-buildWalls();
 buildRows();
 startWalkers();
 
@@ -346,17 +255,13 @@ function renderStage(politician, entered) {
   $('prompter-text').classList.toggle('hacking', state.phase === 'sabotage');
   $('prompter-text').textContent = state.phase === 'sabotage' ? '▓▒░ H4CK1NG ░▒▓' : `${c.opener || ''}…`;
   if (entered && state.phase === 'sabotage') cameraFlashes(2);
-  // The answer stays up while the press rates it, also after a TV refresh.
-  if (state.phase === 'rate' && c.answer) showSubtitle(politician, c.answer, c.opener);
+  // The answer stays up while the press reacts, also after a TV refresh.
+  if (state.phase === 'hearing' && c.answer) showSubtitle(politician, c.answer);
 }
 
-// The teleprompter's part of the answer is marked, so the room sees the setup.
-function showSubtitle(p, text, opener) {
-  $('sub-name').textContent = `${charName(p)}${p ? ` (${p.name})` : ''}`;
-  const safe = esc(text);
-  const start = opener ? esc(opener) : '';
-  $('sub-text').innerHTML = start && safe.startsWith(start) ? `<mark class="opener">${start}</mark>${safe.slice(start.length)}` : safe;
-  $('subtitle').style.setProperty('--c', p?.color || '');
+function showSubtitle(p, text) {
+  $('sub-name').textContent = charName(p);
+  $('sub-text').textContent = text;
   $('subtitle').classList.remove('hidden');
 }
 
@@ -372,14 +277,14 @@ setInterval(() => {
 function setTicker() {
   const lines = {
     lobby: 'Breaking: emergency press conference called · Scan the QR code and create your politician',
+    breaking: 'Live from the news desk',
     ask: 'Developing: journalists sharpen their questions',
     question: 'Live: the press asks the question everyone was afraid of',
     answer: 'Sources say a dodge is being prepared',
-    pick: 'Developing: the press room votes on the question to ask',
+    pick: 'Developing: the press room is getting ready',
     sabotage: 'Technical difficulties: the teleprompter appears to have been tampered with',
     hearing: 'Live: the politician responds · Fact checkers are on standby',
-    rate: 'Viewers decide: how good was that dodge?',
-    results: 'Polls are closed · Results are in',
+    news: 'Live from the news desk · The verdict is in',
     final: 'Final results · The press conference is over',
   };
   // During a round the ticker runs the headline.
@@ -403,6 +308,7 @@ function cameraFlashes(n) {
 // ---- audio -----------------------------------------------------------------
 
 const audio = new Audio();
+const HEADLINE_HOLD_MS = 500; // stay on the anchor a moment after the last word
 
 // Browsers block audio until the page has been clicked once.
 function unlockSound() {
@@ -424,9 +330,16 @@ function play(url, onDone) {
   });
 }
 
-function onHeadline({ audioUrl }) {
-  cameraFlashes(3);
-  play(audioUrl, () => {});
+function onHeadline({ round, audioUrl }) {
+  play(audioUrl, () => setTimeout(() => socket.emit('headline:done', { round }), HEADLINE_HOLD_MS));
+}
+
+function onNews({ round, audioUrl }) {
+  play(audioUrl, () => setTimeout(() => socket.emit('news:done', { round }), HEADLINE_HOLD_MS));
+}
+
+function onFinal({ audioUrl }) {
+  play(audioUrl);
 }
 
 function onQuestion({ round, audioUrl }) {
@@ -434,121 +347,51 @@ function onQuestion({ round, audioUrl }) {
   play(audioUrl, () => socket.emit('question:done', { round }));
 }
 
-function onHearingLine({ round, playerId, text, opener, audioUrl }) {
-  showSubtitle(playerById(playerId), text, opener);
+function onHearingLine({ round, playerId, text, audioUrl }) {
+  showSubtitle(playerById(playerId), text);
   cameraFlashes(2);
   play(audioUrl, () => socket.emit('hearing:done', { round }));
 }
 
-// ---- pick and results ------------------------------------------------------
+// ---- news response and final scores -----------------------------------------
 
-// Anonymous while the press votes, so nobody votes for a friend.
-function renderPick() {
-  $('pick-list').innerHTML = state.questions.map((q) => `<div class="q">“${esc(q.text)}”</div>`).join('');
+function renderNews() {
+  const { approval, verdict } = state.results || {};
+  $('news-approval').textContent = `Approval ${approval}%`;
+  $('news-verdict').textContent = verdict || '';
 }
 
-function stars(avg) {
-  const n = Math.round(avg);
-  return `${'★'.repeat(n)}${'☆'.repeat(5 - n)}`;
-}
-
-function renderResults() {
-  const final = state.phase === 'final';
-  const { bestQuestion = null, rating = {}, points = {} } = state.results || {};
-  const politician = playerById(state.politicianId);
-  $('results-heading').textContent = final ? 'Final results' : `Round ${state.round} results`;
-  $('again').classList.toggle('hidden', !final);
-
-  const author = playerById(bestQuestion);
-  const bestHtml = author
-    ? `<div class="highlight">${face(author, 'small')}<span><small>Best question · +${points[author.id] || 0}</small><strong>${esc(author.name)}</strong>“${esc(state.chosen?.question)}”</span></div>`
-    : '';
-  const ratingHtml = politician && rating.count
-    ? `<div class="highlight">${face(politician, 'small')}<span><small>Answer rating · +${points[politician.id] || 0}</small><strong>${esc(charName(politician))}</strong><span class="stars">${stars(rating.average)}</span> ${rating.average} / 5</span></div>`
-    : '';
-  const slip = state.results?.slip;
-  const names = (ids) => ids.map((id) => esc(playerById(id)?.name || '?')).join(', ');
-  const wolves = Object.entries(state.results?.falseGotchas || {}).map(([id, n]) => `${esc(playerById(id)?.name || '?')} ×${n}`);
-  const slipHtml = slip && politician
-    ? `<div class="highlight">${face(politician, 'small')}<span><small>The slip · ${SLIP_LABEL[slip.type] || ''}</small><strong>${slip.caught.length ? `Caught by ${names(slip.caught)}` : 'Nobody caught it'}</strong>${slip.missed.length} looked away${wolves.length ? ` · Cried wolf: ${wolves.join(', ')}` : ''}</span></div>`
-    : '';
-  const saboteur = playerById(state.results?.saboteurId);
-  const hackHtml = saboteur
-    ? `<div class="highlight">${face(saboteur, 'small')}<span><small>Hacked the teleprompter 😈</small><strong>${esc(saboteur.name)}</strong>“${esc(state.chosen?.opener)}…”</span></div>`
-    : '';
-  $('highlights').innerHTML = final ? '' : ratingHtml + slipHtml + bestHtml + hackHtml;
-
+function renderFinal() {
+  $('final-line').textContent = state.results?.finalLine || '';
   const ranked = [...state.players].sort((a, b) => b.score - a.score);
   const top = ranked[0]?.score;
   $('scoreboard').innerHTML = ranked.map((p, i) => {
-    const win = final && p.score === top && top > 0;
-    const gained = points[p.id] || 0;
-    return `<li class="${win ? 'winner' : ''}" style="--c:${p.color}; animation-delay:${i * 0.15}s">
-      <span class="rank">${i + 1}</span>
+    const rank = ranked.findIndex((other) => other.score === p.score) + 1; // ties share a rank
+    return `<li class="${p.score === top ? 'winner' : ''}" style="--c:${p.color}; animation-delay:${i * 0.15}s">
+      <span class="rank">${rank}</span>
       ${face(p, 'small')}
-      <span class="who">${esc(p.name)}<small>${esc(charName(p))}</small></span>
-      <span class="delta ${gained < 0 ? 'minus' : ''}">${!final && gained ? `${gained > 0 ? '+' : ''}${gained}` : ''}</span>
+      <span class="who">${esc(p.name)}</span>
+      <span class="breakdown">Approval ${p.approvalPoints} + Press ${p.pressPoints} =</span>
       <span>${p.score}</span>
     </li>`;
   }).join('');
-  cameraFlashes(final ? 8 : 4);
-}
-
-// ---- the slip --------------------------------------------------------------
-
-const SLIP_LABEL = {
-  cash: 'Pocketed the cash 💵',
-  cheat: 'Read the answers off a cheat sheet 📜',
-  duck: 'Released the duck 🦆',
-  bribe: 'Took a briefcase of bribes 💼',
-};
-const SLIP_ART = {
-  cash: '<span>💵</span><span>💵</span><span>💵</span>',
-  cheat: '<div class="note">ANSWERS<br><small>1. deny<br>2. deny<br>3. blame intern</small></div>',
-  duck: '<span>🦆</span>',
-  bribe: '<div class="case">💼<b>BRIBES</b></div>',
-};
-
-// About a second of something shady at the podium. The replay plays it at a third of the speed.
-function playSlip(type, slow = false) {
-  if (!SLIP_ART[type]) return;
-  const el = document.createElement('div');
-  el.className = `slip slip-${type}`;
-  el.innerHTML = SLIP_ART[type];
-  el.style.setProperty('--t', slow ? '3.6s' : '1.2s');
-  // The duck and the cheat sheet come up from behind the lectern.
-  const behind = type === 'duck' || type === 'cheat';
-  $('podium').insertBefore(el, behind ? document.querySelector('#podium .lectern') : null);
-  setTimeout(() => el.remove(), slow ? 4000 : 1400);
-}
-
-// Before the results, the TV replays the slip slowly with who caught it.
-let replayTimer = null;
-function startReplay(slip) {
-  const names = (ids) => ids.map((id) => playerById(id)?.name || '?').join(', ');
-  $('replay-text').textContent = `${SLIP_LABEL[slip.type] || ''} · Caught it: ${names(slip.caught) || 'nobody'}${slip.missed.length ? ` · Looked away: ${names(slip.missed)}` : ''}`;
-  document.body.classList.add('replay');
-  clearTimeout(replayTimer);
-  setTimeout(() => playSlip(slip.type, true), 700);
-  replayTimer = setTimeout(() => document.body.classList.remove('replay'), 5500);
+  cameraFlashes(8);
 }
 
 // ---- heckling -------------------------------------------------------------
 
 const HECKLE = {
-  laugh: { icon: '😂', sound: 'laugh', approval: 4 },
-  applause: { icon: '👏', sound: 'applause', approval: 7 },
-  gasp: { icon: '😱', sound: 'gasp', approval: -2 },
-  boo: { icon: '👎', sound: 'boo', approval: -6 },
-  tomato: { icon: '🍅', sound: 'boo', approval: -8 },
-  liar: { icon: 'LIAR!', sound: 'gasp', approval: -6 },
+  laugh: { icon: '😂', sound: 'laugh' },
+  applause: { icon: '👏', sound: 'applause' },
+  cheer: { icon: '🙌', sound: 'applause' },
+  boo: { icon: '👎', sound: 'boo' },
+  tomato: { icon: '🍅', sound: 'boo' },
+  liar: { icon: 'LIAR!', sound: 'gasp' },
 };
-let approval = 50;
 
-function setApproval(value) {
-  approval = Math.max(0, Math.min(100, value));
-  $('meter-fill').style.height = `${approval}%`;
-  $('politician').classList.toggle('sweat', approval < 35);
+// The server keeps approval secret until the news response; this is all the TV gets.
+function setSweat(on) {
+  $('politician').classList.toggle('sweat', Boolean(on));
 }
 
 // Where on screen something comes from or flies to.
@@ -563,7 +406,6 @@ function onReact({ playerId, type }) {
   const seat = document.querySelector(`#press .seat[data-id="${CSS.escape(playerId)}"]`);
   const from = seat ? centerOf(seat) : { x: innerWidth * (0.2 + Math.random() * 0.6), y: innerHeight * 0.85 };
   window.PressAudio?.sfx(h.sound, 0.35);
-  setApproval(approval + h.approval);
   if (type === 'tomato') return throwTomato(from);
   const el = document.createElement('div');
   el.className = `pop${h.icon.length > 2 ? ' word' : ''}`;
@@ -638,7 +480,7 @@ $('add-bot').onclick = () => socket.emit('bot:add', (res) => ($('start-error').t
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') start();
   if ((e.key === 'b' || e.key === 'B') && state.phase === 'lobby') $('add-bot').click();
-  if (e.key === 'n' || e.key === 'N') socket.emit('phase:next');
-  if (e.key === 'r' || e.key === 'R') socket.emit('game:reset');
+  if (DEV && (e.key === 'n' || e.key === 'N')) socket.emit('phase:next');
+  if (DEV && (e.key === 'r' || e.key === 'R')) socket.emit('game:reset');
   if (e.key === 'Escape') exitToMenu();
 });

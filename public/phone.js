@@ -18,10 +18,13 @@ if (!playerId) {
   storageSet('pcPlayerId', playerId);
 }
 $('name').value = storageGet('pcName') || '';
-const roomCode = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
+let roomCode = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
+// Opened without a QR code: ask for the code, and offer to host.
+$('room-code').classList.toggle('hidden', !!roomCode);
+$('host-link').classList.toggle('hidden', !!roomCode);
 
 let state = null;
-let you = null; // { player, role, question, votes: { question, dodge } }
+let you = null; // { player, role, question, votes: { question } }
 let endsAt = null;
 let editingQuestion = false;
 
@@ -44,17 +47,21 @@ function join() {
   const name = $('name').value.trim();
   if (!name) return $('name').focus();
   storageSet('pcName', name);
+  roomCode = $('room-code').value.trim().toUpperCase() || roomCode;
   if (!roomCode) {
-    $('join-error').textContent = 'Scan the QR code on the TV to join.';
+    $('join-error').textContent = 'Type the room code from the TV.';
     return show('join');
   }
   storageSet('pcLeft', '');
   socket.emit('player:join', { roomCode, playerId, name }, (res) => {
     if (res.error) {
       $('join-error').textContent = res.error;
+      $('room-code').value = roomCode;
+      $('room-code').classList.remove('hidden'); // the game may be over, so let them type a new code
       return show('join');
     }
     $('join-error').textContent = '';
+    history.replaceState(null, '', `?room=${roomCode}`); // a refresh rejoins
     setYou(res.you);
   });
 }
@@ -69,7 +76,7 @@ $('join-form').onsubmit = (e) => {
 socket.on('connect', () => {
   $('conn').className = 'on';
   // Rejoin automatically after a refresh or a dropped connection, unless they pressed Exit.
-  if (storageGet('pcName') && !storageGet('pcLeft')) join();
+  if (roomCode && storageGet('pcName') && !storageGet('pcLeft')) join();
 });
 socket.on('disconnect', () => ($('conn').className = 'off'));
 socket.on('you', setYou);
@@ -85,9 +92,7 @@ function setYou(y) {
   const p = y.player;
   if (p) {
     document.body.style.setProperty('--c', p.color);
-    $('me-tag').textContent = `${p.name} · ${charName(p)}`;
-    setAll('.char-name', charName(p));
-    setAll('.char-title', p.character?.title || '');
+    $('me-tag').textContent = p.name;
   }
   render();
 }
@@ -103,7 +108,7 @@ function look(kicker, text, sub = '', avatarOf = null) {
   $('look-text').textContent = text;
   $('look-sub').textContent = sub;
   $('look-avatar').classList.toggle('hidden', !avatarOf);
-  if (avatarOf) $('look-avatar').innerHTML = avatarSvg(avatarOf.look, avatarOf.color);
+  if (avatarOf) $('look-avatar').innerHTML = cropped(avatarOf.avatarUrl, CROPS.hair);
   show('look');
 }
 
@@ -120,6 +125,10 @@ function render() {
     case 'lobby':
       renderCreator(me);
       return show('create');
+    case 'breaking':
+      $('breaking-text').textContent = atPodium ? 'You\'re at the podium this round' : 'Watch the TV';
+      $('breaking-sub').textContent = atPodium ? 'Watch the TV.' : `${charName(politician)} takes the podium next.`;
+      return show('breaking');
     case 'ask':
       if (atPodium) return show('podium');
       return renderAsk();
@@ -137,38 +146,105 @@ function render() {
       if (atPodium) return renderAnswer();
       return look('Eyes on the TV', `${charName(politician)} is writing a dodge…`, '', politician);
     case 'hearing':
-      if (atPodium) return renderSlip(me);
-      return show('heckle');
-    case 'rate':
-      if (atPodium) return renderSlip(me);
-      return renderRate();
-    case 'results':
+      if (atPodium) return look('The hearing', 'Your answer is playing on the TV', 'Keep a straight face.', me);
+      return renderReactions();
+    case 'news':
+      return look('Watch the TV', `Approval ${state.results?.approval}%`, '', politician);
     case 'final':
-      return renderResults(me);
+      return renderFinal(me);
   }
 }
 
-// ---- pick your politician -------------------------------------------------
+// ---- build your politician -------------------------------------------------
 
-function renderCreator(me) {
-  $('char-list').innerHTML = (state.characters || []).map((c) => {
-    const holder = playerById(c.takenBy);
-    const mine = c.takenBy === me.id;
-    const taken = holder && !mine && !holder.bot;
-    const note = mine ? 'You' : holder ? `${esc(holder.name)}${holder.bot ? ' · tap to steal' : ''}` : '';
-    return `<button type="button" class="char-card ${mine ? 'mine' : ''}" data-id="${c.id}" ${taken ? 'disabled' : ''}>
-      <span class="char-face">${avatarSvg(c.look, mine ? me.color : '#d7263d')}</span>
-      <strong>${esc(c.name)}</strong>
-      <small>${esc(c.title)}</small>
-      ${note ? `<span class="char-taken">${note}</span>` : ''}
-    </button>`;
-  }).join('');
+// Step 0 is the name, then one step per item, then the ready screen.
+const ITEMS = ['suit', 'face', 'hair'];
+const ITEM_TITLES = { suit: 'pick your suit', face: 'pick a face item', hair: 'pick your hair' };
+const ITEM_LABELS = { suit: 'suit', face: 'face item', hair: 'hair' };
+const READY_STEP = ITEMS.length + 1;
+let pickStep = 1; // they just typed their name to join
+
+// Where each item sits on the 640px avatar image: centre x, centre y, size.
+const CROPS = { suit: [345, 440, 250], face: [349, 225, 215], hair: [349, 215, 285] };
+
+function cropped(src, [x, y, size]) {
+  const style = `width:${(640 / size) * 100}%;left:${(0.5 - x / size) * 100}%;top:${(0.5 - y / size) * 100}%`;
+  return `<img class="crop" src="${esc(src)}" alt="" style="${style}">`;
 }
 
-$('char-list').onclick = (e) => {
-  const btn = e.target.closest('.char-card');
-  if (!btn || btn.disabled || btn.classList.contains('mine')) return;
-  socket.emit('player:character', { characterId: btn.dataset.id }, (res) => {
+function renderCreator(me) {
+  const options = state.avatarOptions;
+  if (!options) return;
+  const item = ITEMS[pickStep - 1];
+  const count = options.suit.length;
+  const players = state.players.length;
+  const nameStep = pickStep === 0;
+  const ready = pickStep === READY_STEP;
+
+  $('pick-img').src = me.avatarUrl;
+  $('pick-img').alt = `Your politician: ${ITEMS.map((i) => options[i][me.avatar[i]]).join(', ')}`;
+  $('pick-who').textContent = me.name;
+  $('pick-title').textContent = nameStep ? 'type your name' : ready ? "you're ready" : ITEM_TITLES[item];
+  $('pick-step').textContent = ready ? '' : `step ${pickStep + 1} of ${READY_STEP}`;
+  $('pick-rule').textContent = ready ? 'The host starts the game on the TV.'
+    : nameStep ? 'Call yourself whatever you want.'
+    : `${count === players ? `${players} players, ` : ''}${count} options per item`;
+  $('pick-name-form').classList.toggle('hidden', !nameStep);
+  $('pick-tiles').classList.toggle('hidden', !item);
+  $('pick-summary').classList.toggle('hidden', !ready);
+  $('pick-next').classList.toggle('hidden', ready);
+  $('pick-next').textContent = pickStep === ITEMS.length ? 'ready' : 'next';
+
+  if (item) {
+    $('pick-tiles').style.setProperty('--n', count);
+    $('pick-tiles').innerHTML = options[item].map((label, i) => {
+      const { suit, face, hair } = { ...me.avatar, [item]: i };
+      const on = me.avatar[item] === i;
+      return `<button type="button" data-item="${item}" data-index="${i}" aria-pressed="${on}" class="${on ? 'on' : ''}">
+        <span class="tile">${cropped(`/avatars/${suit}-${face}-${hair}.webp`, CROPS[item])}</span>${esc(label)}</button>`;
+    }).join('');
+  }
+  if (ready) {
+    $('pick-summary').innerHTML = [['name', me.name], ...ITEMS.map((i) => [ITEM_LABELS[i], options[i][me.avatar[i]]])]
+      .map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('');
+  }
+}
+
+function goToStep(step) {
+  pickStep = step;
+  $('char-error').textContent = '';
+  if (step === 0) $('pick-name').value = you.player.name;
+  render();
+}
+
+function saveName() {
+  const name = $('pick-name').value.trim();
+  if (!name) {
+    $('char-error').textContent = 'Type a name first';
+    return $('pick-name').focus();
+  }
+  $('pick-name').blur();
+  socket.emit('player:name', { name }, (res) => {
+    if (res?.error) {
+      $('char-error').textContent = res.error;
+      return;
+    }
+    storageSet('pcName', name);
+    goToStep(1);
+  });
+}
+
+$('pick-name-form').onsubmit = (e) => {
+  e.preventDefault();
+  saveName();
+};
+$('pick-next').onclick = () => (pickStep === 0 ? saveName() : goToStep(pickStep + 1));
+$('pick-back').onclick = () => goToStep(Math.max(0, pickStep - 1));
+
+$('pick-tiles').onclick = (e) => {
+  const btn = e.target.closest('button');
+  if (!btn || btn.classList.contains('on')) return;
+  socket.emit('player:avatar', { [btn.dataset.item]: Number(btn.dataset.index) }, (res) => {
     $('char-error').textContent = res?.error || '';
   });
 };
@@ -271,26 +347,6 @@ function submitOnEnter(box, form) {
   };
 }
 
-// ---- rate (journalists) ----------------------------------------------------
-
-function renderRate() {
-  $('rate-answer').textContent = state.chosen?.answer || '';
-  const rating = you.votes?.stars || 0;
-  $('stars').innerHTML = [1, 2, 3, 4, 5].map((n) => `<button type="button" data-stars="${n}" class="${n <= rating ? 'on' : ''}">★</button>`).join('');
-  $('rate-done').classList.toggle('hidden', !rating);
-  show('rate');
-}
-
-// You can change your rating until time is up.
-$('stars').onclick = (e) => {
-  const btn = e.target.closest('button');
-  if (!btn) return;
-  socket.emit('answer:rate', { stars: Number(btn.dataset.stars) }, (res) => {
-    $('rate-error').textContent = res?.error || '';
-    if (!res?.error) navigator.vibrate?.(40);
-  });
-};
-
 // ---- sabotage (one journalist) -------------------------------------------
 
 function renderSabotage() {
@@ -314,9 +370,16 @@ $('sabotage-form').onsubmit = (e) => {
   });
 };
 
-// ---- heckling (journalists, while the answer plays and is rated) ----------
+// ---- reactions (journalists, while the answer plays) ----------------------
 
-const HECKLES = [['laugh', '😂'], ['applause', '👏'], ['gasp', '😱'], ['boo', '👎'], ['tomato', '🍅'], ['liar', 'LIAR!']];
+function renderReactions() {
+  const left = you.reactionsLeft;
+  $('reactions-left').textContent = left ? `${left} ${left === 1 ? 'reaction' : 'reactions'} left` : 'No reactions left';
+  for (const btn of document.querySelectorAll('.heckles button')) btn.disabled = !left;
+  show('heckle');
+}
+
+const HECKLES = [['laugh', '😂'], ['applause', '👏'], ['cheer', '🙌'], ['boo', '👎'], ['tomato', '🍅'], ['liar', 'LIAR!']];
 for (const el of document.querySelectorAll('.heckles')) {
   el.innerHTML = HECKLES.map(([type, label]) => `<button type="button" data-type="${type}" class="${label.length > 2 ? 'word' : ''}">${label}</button>`).join('');
   el.onclick = (e) => {
@@ -324,45 +387,6 @@ for (const el of document.querySelectorAll('.heckles')) {
     if (!btn) return;
     navigator.vibrate?.(15);
     socket.emit('crowd:react', { type: btn.dataset.type }, () => {});
-  };
-}
-
-// ---- the slip (politician) and GOTCHA (journalists) -------------------------
-
-const SLIPS = [['cash', '💵', 'Pocket the cash'], ['cheat', '📜', 'Read the cheat sheet'], ['duck', '🦆', 'Release the duck'], ['bribe', '💼', 'Take the bribes']];
-$('slip-buttons').innerHTML = SLIPS.map(([type, icon, label]) => `<button type="button" data-type="${type}"><span>${icon}</span>${label}</button>`).join('');
-
-function renderSlip(me) {
-  if (you.slipped) return look('Done 🤫', 'Did they see it?', 'Find out at the results.', me);
-  show('slip');
-}
-
-$('slip-buttons').onclick = (e) => {
-  const btn = e.target.closest('button');
-  if (!btn) return;
-  socket.emit('slip:do', { type: btn.dataset.type }, (res) => {
-    $('slip-error').textContent = res?.error || '';
-    if (!res?.error) navigator.vibrate?.(60);
-  });
-};
-
-// Nobody finds out whether they caught it until the results.
-for (const btn of document.querySelectorAll('.gotcha')) {
-  btn.onclick = () => {
-    navigator.vibrate?.(40);
-    socket.emit('crowd:gotcha', {}, (res) => {
-      if (res?.error) return;
-      for (const b of document.querySelectorAll('.gotcha')) {
-        b.textContent = 'Called it 🤫';
-        b.disabled = true;
-      }
-      setTimeout(() => {
-        for (const b of document.querySelectorAll('.gotcha')) {
-          b.textContent = '🫵 GOTCHA!';
-          b.disabled = false;
-        }
-      }, 1500);
-    });
   };
 }
 
@@ -390,37 +414,17 @@ function resetExit() {
   $('exit').textContent = 'Exit';
 }
 
-// ---- results ---------------------------------------------------------------
+// ---- final scores ----------------------------------------------------------
 
-function renderResults(me) {
-  const final = state.phase === 'final';
-  const { bestQuestion = null, saboteurId = null, rating = {}, points = {}, slip = null, falseGotchas = {} } = state.results || {};
-  const ranked = [...state.players].sort((a, b) => b.score - a.score);
-  const rank = ranked.findIndex((p) => p.id === me.id) + 1;
-  const wasPolitician = state.politicianId === me.id;
-  $('result-avatar').innerHTML = avatarSvg(me.look, me.color);
-
-  if (final) {
-    $('result-kicker').textContent = 'Final results';
-    $('result-rank').textContent = rank === 1 && me.score > 0 ? 'You won the press conference!' : `You finished #${rank}`;
-    $('result-score').textContent = `${me.score} points`;
-  } else {
-    $('result-kicker').textContent = `Round ${state.round} results`;
-    if (wasPolitician) {
-      const n = Math.round(rating.average || 0);
-      $('result-rank').textContent = rating.count ? `Your answer: ${'★'.repeat(n)}${'☆'.repeat(5 - n)} (${rating.average})` : 'Nobody rated you';
-      if (slip) $('result-rank').textContent += ` · ${slip.missed.length} missed your slip`;
-    } else {
-      $('result-rank').textContent = bestQuestion === me.id ? 'Your question won!' : 'Your question wasn\'t picked';
-      if (saboteurId === me.id) $('result-rank').textContent += ' · You hacked the teleprompter 😈';
-      if (slip) $('result-rank').textContent += slip.caught.includes(me.id) ? ' · You caught the slip! 🫵' : ' · You missed the slip 👀';
-      if (falseGotchas[me.id]) $('result-rank').textContent += ` · ${falseGotchas[me.id]} false GOTCHA`;
-    }
-    const gained = points[me.id] || 0;
-    $('result-score').textContent = `${gained < 0 ? '' : '+'}${gained} this round · ${me.score} points · #${rank}`;
-  }
-  if (rank === 1 && final) navigator.vibrate?.([80, 60, 80]);
-  show('results');
+function renderFinal(me) {
+  const rank = state.players.filter((p) => p.score > me.score).length + 1; // ties share a rank
+  const tied = state.players.filter((p) => p.score === me.score).length > 1;
+  $('result-avatar').innerHTML = cropped(me.avatarUrl, CROPS.hair);
+  if (rank > 1) $('result-rank').textContent = `You finished #${rank}`;
+  else $('result-rank').textContent = tied ? 'You tied for first!' : 'You won the press conference!';
+  $('result-score').textContent = `Approval ${me.approvalPoints} + Press ${me.pressPoints} = ${me.score}`;
+  if (rank === 1) navigator.vibrate?.([80, 60, 80]);
+  show('final');
 }
 
 // ---- timer -----------------------------------------------------------------

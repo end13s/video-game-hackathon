@@ -15,9 +15,13 @@
   "dependencies": {
     "dotenv": "^18.0.9",
     "express": "^5.3.0",
-    "phaser": "^3.90.0",
     "qrcode": "^1.5.4",
-    "socket.io": "^4.8.4",
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
     "socket.io-client": "^4.8.4"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

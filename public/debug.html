@@ -86,9 +86,10 @@
 
     // Keep the room across refreshes: the code lives in the URL.
     const params = new URLSearchParams(location.search);
-    socket.on('connect', () => socket.emit('tv:join', { roomCode: params.get('room') }, (res) => {
+    socket.on('connect', () => socket.emit('tv:join', { roomCode: params.get('room'), key: params.get('key') }, (res) => {
       if (res.error) return log(res.error);
       params.set('room', res.roomCode);
+      params.set('key', res.key);
       history.replaceState(null, '', `?${params}`);
       const joinUrl = `${location.origin}/?room=${res.roomCode}`;
       $('room').innerHTML = `room <b>${res.roomCode}</b> · phones: <a href="${joinUrl}" target="_blank" style="color:#93c5fd">${joinUrl}</a>`;
